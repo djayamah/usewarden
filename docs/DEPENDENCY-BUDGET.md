@@ -81,3 +81,32 @@ Node 22 and 24 — the fallback is `better-sqlite3`, and taking it means:
 That deliberate friction is the point. Measured on this build machine: `node:sqlite` opens,
 WAL-enables and round-trips identically on Node 22.22.0 and 25.5.0
 (`verification/phase0-node-sqlite.txt`).
+
+---
+
+## Evaluated, not adopted — 2026-08-19
+
+Dependabot opened two major bumps on the day the repository went public. Both were built,
+typechecked, tested and run through `verify-all.sh` locally. Recorded here rather than merged,
+because the budget is the point of this file.
+
+| Bump | Verdict | Effect on the budget |
+|---|---|---|
+| `@types/node` 22.20.1 → **26.2.0** | passes every gate | none — pure type declarations, no runtime code, not in the tarball. One thing to watch: the major tracks Node's, and types from the 26 line describe APIs that do not exist on the Node 22.13 floor, so a strict build could start accepting code that fails at runtime on LTS. CI covers it — the suite runs on 22, 24 and 25 |
+| `typescript` 5.9.3 → **7.0.2** | passes every gate, **but changes the shape** | lockfile **4 → 24 entries**. TypeScript 7 is a native binary, so it brings `typescript` plus 20 `@typescript/typescript-<platform>` optional packages |
+
+For the TypeScript bump specifically, the things this project actually cares about were checked
+rather than assumed:
+
+- **No install scripts** in any of the 21 new entries. `tests/packaging.test.ts` walks every
+  lockfile entry for `hasInstallScript` and the four lifecycle names; it stayed green, and it was
+  re-checked by hand.
+- **Dev-only.** `npm pack --dry-run` is unchanged at 37 files. None of it can reach a user.
+- CI runs `npm ci --ignore-scripts`, so nothing in that tree could execute at install time even if
+  it grew a script in a later release.
+
+It is safe as far as anything can be checked automatically. It is also a **native-binary
+dependency** arriving in a project that chose `node:sqlite` over `better-sqlite3` precisely to
+avoid native addons, and 20 new packages is a real increase in review surface for a two-dependency
+project. That trade is a maintainer's call, so both PRs were left open with the evidence attached
+rather than merged by an automated run. Neither blocks anything.
