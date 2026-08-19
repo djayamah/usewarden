@@ -156,7 +156,7 @@ print(f\"L_DEL={str(d.get('allow_deletions',{}).get('enabled')).lower()}\")
     [ "$L_ADMIN" = "true" ] && row PASS "ADMIN BYPASS OFF (enforce_admins)" "ok"                || row FAIL "ADMIN BYPASS OFF" "admins can bypass - this is the ChainDrop hole"
   else
     DETAIL="no ruleset and no legacy protection"
-    if printf '%s' "$RS_RAW$LEGACY_RAW" | grep -q "Upgrade to GitHub Pro"; then
+    if grep -q "Upgrade to GitHub Pro" <<<"$RS_RAW$LEGACY_RAW"; then
       DETAIL="BLOCKED BY PLAN: GitHub Free does not allow branch protection on PRIVATE repos"
     fi
     row FAIL "branch protection on ${DEFBR:-main}" "$DETAIL"
@@ -212,7 +212,7 @@ fi
 if [ $GH_OK -eq 1 ]; then
   SCOPES="$(gh auth status 2>&1 | grep -o "Token scopes:.*" | head -1)"
   row PASS "gh CLI token scopes visible" "${SCOPES:-unknown}"
-  if printf '%s' "$SCOPES" | grep -qE "'(repo|workflow|write:packages|admin:org|delete_repo)'"; then
+  if grep -qE "'(repo|workflow|write:packages|admin:org|delete_repo)'" <<<"$SCOPES"; then
     row FAIL "gh CLI token is not over-scoped" "write scopes present. Required for THIS setup; rotate to read-only or revoke once hardening is done - ops/SETUP-BY-HAND.md step 2"
   else
     row PASS "gh CLI token is not over-scoped" "$SCOPES"

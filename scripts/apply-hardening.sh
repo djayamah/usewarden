@@ -98,7 +98,7 @@ if [ -n "$EXISTING" ]; then
 else
   if OUT="$(gh api -X POST "repos/$REPO_SLUG/rulesets" --input "$TMP/ruleset.json" 2>&1)"; then
     say OK "ruleset 'protect-main' created, bypass_actors=0 (applies to the owner too)"
-  elif printf '%s' "$OUT" | grep -q "Upgrade to GitHub Pro"; then
+  elif grep -q "Upgrade to GitHub Pro" <<<"$OUT"; then
     say BLOCKED "branch protection: GitHub Free does not allow it on PRIVATE repos."
     echo "          Resolve step 3 of ops/SETUP-BY-HAND.md, then re-run this script."
   else
@@ -123,7 +123,7 @@ JSON
 # to true the day a second maintainer exists (ops/SETUP-BY-HAND.md step 11).
 if OUT="$(gh api -X PUT "repos/$REPO_SLUG/environments/release" --input "$TMP/env-full.json" 2>&1)"; then
   say OK "environment 'release' with required reviewer @$OWNER, protected branches only"
-elif printf '%s' "$OUT" | grep -qi "billing plan"; then
+elif grep -qi "billing plan" <<<"$OUT"; then
   say BLOCKED "required reviewers: not available on this plan for a PRIVATE repo."
   # Even `wait_timer: 0` is rejected on this plan - it counts as creating a protection rule.
   # An empty body creates the environment with no rules at all, which is what Free allows.

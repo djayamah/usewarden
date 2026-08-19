@@ -1,8 +1,8 @@
 === USEWARDEN HARDENING VERIFICATION ===
-captured:  2026-08-19T16:27:44Z
+captured:  2026-08-19T17:33:28Z
 repo:      djayamah/usewarden
 package:   usewarden
-commit:    582c1d0346b44d4aa53f2fddc920fe0d0fdbb5b1
+commit:    7a30cf2db8776a8acc78d9e3d766e9eba5603edb
 
 STATUS      CONTROL                                              DETAIL
 ----------- ---------------------------------------------------- ------
@@ -30,7 +30,7 @@ PASS        no NPM_TOKEN anywhere in the workflow                trusted publish
 PASS        every action pinned to a commit SHA                  2 action(s), no tags
 PASS        .github/dependabot.yml present                       34 lines
 PASS        .github/CODEOWNERS present                           16 lines
-PASS        SECURITY.md present                                  82 lines
+PASS        SECURITY.md present                                  91 lines
 PASS        LICENSE present                                      21 lines
 PASS        .npmrc present                                       6 lines
 PASS        dependabot honours a cooldown                        matches .npmrc min-release-age
