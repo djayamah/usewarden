@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Store } from './store.js';
 import { usewardenHome } from './paths.js';
+import { mkdirpSafe } from './util.js';
 
 /**
  * Telemetry (spec section 3C, docs/THREAT-MODEL.md T-15, schema in docs/TELEMETRY.md).
@@ -96,7 +97,7 @@ export function isSafeLabel(s: string): boolean {
 /** Records the payload locally, always. This is the whole of v1. */
 export function record(store: Store, payload: TelemetryPayload): string {
   const dir = path.join(usewardenHome(), 'telemetry');
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  mkdirpSafe(dir);
   const file = path.join(dir, 'local.jsonl');
   fs.appendFileSync(file, JSON.stringify(payload) + '\n', { mode: 0o600 });
   return file;

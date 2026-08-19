@@ -117,11 +117,27 @@ ls -1 verification/live/*.txt | sed 's/^/    /'
 
 echo
 echo "--- documentation completeness ---"
-for f in README.md SECURITY.md LICENSE PROGRESS.md DECISIONS.md \
-         docs/HOOK-MATRIX.md docs/THREAT-MODEL.md docs/DEPENDENCY-BUDGET.md docs/TELEMETRY.md \
-         launch/NAME-CANDIDATES.md launch/POSTS.md launch/PUBLISH-CHECKLIST.md launch/RULES-REGISTRY.md; do
+# Split deliberately. The first list ships in the public repository and a fresh clone must have
+# every one of them; the second list is the private build record, which the publication tree
+# excludes on purpose (scripts/build-publish-tree.sh). Requiring the second list unconditionally
+# would make this script fail for any contributor who ran it, which is a check that trains people
+# to ignore it.
+PUBLIC_DOCS="README.md SECURITY.md LICENSE CONTRIBUTING.md DECISIONS.md
+  .github/workflows/ci.yml .github/workflows/release.yml .github/pull_request_template.md
+  .github/ISSUE_TEMPLATE/bug_report.yml .github/ISSUE_TEMPLATE/agent_support.yml
+  assets/incident-card.png assets/dashboard.png
+  docs/HOOK-MATRIX.md docs/THREAT-MODEL.md docs/DEPENDENCY-BUDGET.md docs/TELEMETRY.md
+  ops/JUDGE-LIVE-CHECK.md"
+INTERNAL_DOCS="CLAUDE.md PROGRESS.md launch/NAME-CANDIDATES.md launch/POSTS.md
+  launch/PUBLISH-CHECKLIST.md launch/RULES-REGISTRY.md"
+
+for f in $PUBLIC_DOCS; do
   if [ -s "$f" ]; then printf 'PASS  %s (%s lines)\n' "$f" "$(wc -l < "$f" | tr -d ' ')"
   else printf 'FAIL  %s missing or empty\n' "$f"; FAILED=1; fi
+done
+for f in $INTERNAL_DOCS; do
+  if [ -s "$f" ]; then printf 'PASS  %s (%s lines)\n' "$f" "$(wc -l < "$f" | tr -d ' ')"
+  else printf 'SKIP  %s absent - internal build record, not part of a public checkout\n' "$f"; fi
 done
 echo
 if grep -n "PENDING" docs/THREAT-MODEL.md | grep -qv "says \`PENDING\`\|no PENDING rows"; then

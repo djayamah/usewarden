@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import * as fs from 'node:fs';
 
 /**
  * FIRST STATEMENT of every process entrypoint.
@@ -11,6 +12,64 @@ import * as os from 'node:os';
  */
 export function silenceNodeWarnings(): void {
   process.removeAllListeners('warning');
+}
+
+/**
+ * A `mkdir -p` that CANNOT HANG.
+ *
+ * Node's `fs.mkdirSync(p, { recursive: true })` blocks forever when the target sits on procfs -
+ * measured on Linux, where `mkdirSync("/proc/x/y", { recursive: true })` never returns while the
+ * non-recursive form fails instantly with ENOENT. That is a platform quirk, but the consequence
+ * for usewarden is the worst kind of failure it can have: the hook runs inside the agent's
+ * critical path, a blocked hook is a blocked agent, and the whole promise of this tool is that it
+ * fails OPEN. It hung a CI job for fifteen minutes before it hung anything else.
+ *
+ * A timer cannot rescue this - the block is inside a synchronous syscall, so no watchdog in this
+ * process would ever get a turn. The fix is therefore to never make the call that can block:
+ * walk up to the nearest EXISTING ancestor with `statSync` (which returns immediately even on
+ * procfs), check it is a writable directory, and then create the missing components one at a
+ * time with the non-recursive form (which fails fast).
+ *
+ * Throws a normal Error on failure. Callers that must not fail hard already wrap this.
+ */
+export function mkdirpSafe(target: string, mode = 0o700): void {
+  const abs = path.resolve(target);
+
+  // Virtual filesystems are never a legitimate home for state, and naming them produces a far
+  // better message than "operation failed".
+  for (const vfs of ['/proc', '/sys', '/dev']) {
+    if (abs === vfs || abs.startsWith(vfs + path.sep)) {
+      throw new Error(`refusing to create ${abs}: ${vfs} is a virtual filesystem, not a place for state`);
+    }
+  }
+
+  // Find the nearest existing ancestor, collecting what has to be created.
+  const missing: string[] = [];
+  let cur = abs;
+  for (;;) {
+    let st: fs.Stats | undefined;
+    try { st = fs.statSync(cur); } catch { st = undefined; }
+    if (st) {
+      if (!st.isDirectory()) throw new Error(`refusing to create ${abs}: ${cur} exists and is not a directory`);
+      break;
+    }
+    missing.push(cur);
+    const parent = path.dirname(cur);
+    if (parent === cur) throw new Error(`refusing to create ${abs}: reached the filesystem root without finding an existing directory`);
+    cur = parent;
+    if (missing.length > 64) throw new Error(`refusing to create ${abs}: path is implausibly deep`);
+  }
+
+  fs.accessSync(cur, fs.constants.W_OK);   // throws EACCES fast, rather than failing halfway up
+
+  for (const dir of missing.reverse()) {
+    try {
+      fs.mkdirSync(dir, { mode });
+    } catch (e) {
+      // A concurrent creator winning the race is success, not failure.
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+    }
+  }
 }
 
 export function sha256(input: string | Buffer): string {

@@ -120,5 +120,33 @@ HOME="$SYNHOME" USEWARDEN_HOME="$SYNHOME/.usewarden" USEWARDEN_AGENT_HOME="$SYNH
 HOME="$SYNHOME" USEWARDEN_HOME="$SYNHOME/.usewarden" USEWARDEN_AGENT_HOME="$SYNHOME" \
   SHOT_CWD="$PROJECT" "$REPO/scripts/screenshot.sh"
 
+# --- the README hero: a single incident card, at the product's own CSS ---------------------
+mkdir -p "$REPO/assets"
+HOME="$SYNHOME" USEWARDEN_HOME="$SYNHOME/.usewarden" USEWARDEN_AGENT_HOME="$SYNHOME" \
+  bash -c "cd '$PROJECT' && node '$REPO/dist/src/cli.js' dashboard --json" > "$STAGE/dash.json" 2>&1 &
+CARD_PID=$!
+URL=""
+for _ in $(seq 1 50); do
+  URL="$(python3 -c "import json;print(json.load(open('$STAGE/dash.json'))['url'])" 2>/dev/null || true)"
+  [ -n "$URL" ] && break
+  sleep 0.2
+done
+if [ -n "$URL" ]; then
+  python3 "$REPO/scripts/slice-card.py" "$URL&theme=dark" "$STAGE/card.html" 2
+  "$SHELL_BIN" --headless --disable-gpu --hide-scrollbars --no-sandbox \
+    --user-data-dir="$STAGE/cardprofile" --window-size=980,492 --virtual-time-budget=2000 \
+    --screenshot="$REPO/assets/incident-card.png" "file://$STAGE/card.html" >/dev/null 2>&1
+  if [ -s "$REPO/assets/incident-card.png" ]; then
+    echo "  assets/incident-card.png written"
+  else
+    echo "  FAIL: assets/incident-card.png was not produced" >&2
+    kill "$CARD_PID" 2>/dev/null || true
+    exit 1
+  fi
+  cp "$REPO/verification/dashboard-dark.png" "$REPO/assets/dashboard.png"
+  echo "  assets/dashboard.png written"
+fi
+kill "$CARD_PID" 2>/dev/null || true
+
 echo
 echo "captured under a synthetic HOME; the real home directory appears nowhere in the PNGs."

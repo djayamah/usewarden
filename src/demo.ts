@@ -8,6 +8,7 @@ import { loadPolicy } from './policy/load.js';
 import type { NormalizedEvent } from './types.js';
 import { bad, dim, head, ok } from './term.js';
 import { incidentCard } from './cli.js';
+import { mkdirpSafe } from './util.js';
 
 /**
  * `usewarden demo` - spec 3B calls this "the single highest-leverage adoption feature; do not cut
@@ -50,9 +51,9 @@ export async function runDemo(json: boolean): Promise<number> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'usewarden-demo-'));
   const fixture = path.join(root, 'demo-project');
   const sibling = path.join(root, 'other-repo');
-  fs.mkdirSync(path.join(fixture, 'src'), { recursive: true });
-  fs.mkdirSync(path.join(fixture, '.git'), { recursive: true });
-  fs.mkdirSync(path.join(sibling, '.git'), { recursive: true });
+  mkdirpSafe(path.join(fixture, 'src'), 0o755);
+  mkdirpSafe(path.join(fixture, '.git'), 0o755);
+  mkdirpSafe(path.join(sibling, '.git'), 0o755);
   fs.writeFileSync(path.join(fixture, '.env'), 'API_KEY=not-a-real-key\n');
   fs.writeFileSync(path.join(fixture, '.git', 'HEAD'), 'ref: refs/heads/main\n');
   fs.writeFileSync(path.join(sibling, '.git', 'HEAD'), 'ref: refs/heads/main\n');

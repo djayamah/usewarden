@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { parseYaml, YamlError } from './yaml.js';
 import { defaultPolicy, PolicyError, validatePolicy, type Policy } from './schema.js';
 import { globalPolicyPath, usewardenHome } from '../paths.js';
-import { resolveUserPath, sha256 } from '../util.js';
+import { mkdirpSafe, resolveUserPath, sha256 } from '../util.js';
 
 export interface LoadedPolicy {
   policy: Policy;
@@ -39,7 +39,7 @@ export function isTrusted(repoPolicyPath: string): boolean {
 export function trust(repoPolicyPath: string): void {
   const abs = path.resolve(repoPolicyPath);
   const f = trustFile();
-  fs.mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 });
+  mkdirpSafe(path.dirname(f));
   const existing = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
   if (existing.split('\n').map((l) => l.trim()).includes(abs)) return;
   fs.writeFileSync(f, existing + (existing.endsWith('\n') || existing === '' ? '' : '\n') + abs + '\n', { mode: 0o600 });

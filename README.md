@@ -4,40 +4,90 @@
 machine — Claude Code, Cursor, Gemini CLI, Copilot CLI, Codex, OpenCode — for drift, blocks
 out-of-scope actions, and shows you what it caught.
 
-```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│ BLOCKED  Blocked write outside session scope                                     │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│ when     2026-08-19 12:38:06Z                                                    │
-│ agent    claude  live session                                                    │
-│ attempt  Write /Users/you/dev/sibling-repo/src/helper.js                         │
-│ why      Usewarden: that path is outside this session's allowed scope. It is inside │
-│          a DIFFERENT repository (sibling-repo) sitting beside this one. Work     │
-│          inside the repo, or have the human widen scope in usewarden.yaml.          │
-│ rule     scope.allowed_paths  (layer 1)                                          │
-└──────────────────────────────────────────────────────────────────────────────────┘
+![Two incident cards from a real agent session: a Layer 1 block of `rm -rf` outside the repo, and the Layer 2 drift judge flagging the same action](assets/incident-card.png)
+
+Both cards are real output from a real `claude --dangerously-skip-permissions` session. Layer 1
+blocked the command deterministically in under a millisecond; Layer 2 independently agreed it was
+off-goal. The agent read the reason, stopped, and explained itself instead of routing around the
+block. *(Absolute paths in the image are rewritten to a synthetic project — see
+[How the screenshots are made](#how-the-screenshots-are-made).)*
+
+```bash
+git clone https://github.com/djayamah/usewarden && cd usewarden
+npm install && npm run build
+node dist/src/cli.js init      # detects your agents, shows you a diff, registers hooks
+node dist/src/cli.js demo      # see a real incident card in 5 seconds
 ```
 
-That card is real output from a real `claude --dangerously-skip-permissions` session. The agent
-read the reason, stopped, and explained itself instead of routing around the block.
+> **Not on npm yet.** `usewarden` is unclaimed on the registry and this repository has never
+> published to it. When it does, the line above becomes `npx usewarden init` — and it will be
+> published through OIDC trusted publishing with no npm token in existence, which is the whole
+> point of [the release hardening](#security-posture). Until then, from source is the only way,
+> and saying otherwise would be the first thing this tool tells you not to trust.
+
+---
+
+## Why this exists
+
+Every agent guardrail is easy to write and hard to know is working. Usewarden's own build kept
+proving that: **six defects made it through a green test suite and were caught only by running a
+real agent against a real fixture.**
+
+| | The defect | What the test suite said | What was actually happening |
+|---|---|---|---|
+| 1 | The built CLI had no execute bit | 95/95 passing | **Every** Claude Code hook died with `EACCES: posix_spawn`, and `status` said **PROTECTED** |
+| 2 | Gemini CLI's hook `timeout` is milliseconds, not seconds | contract tests passing | `timeout: 10` meant 10 ms; every event timed out |
+| 3 | Only Claude Code supports a `command` + `args` pair | contract tests passing | Gemini dropped `args` and ran a bare `node` with no script |
+| 4 | Gemini treats empty stdout with exit 0 as a hook **failure** | contract tests passing | Correct "no opinion" responses were logged as errors |
+| 5 | The build log's own updater used an exact-string `replace()` | every write returned success | Ten phases of updates silently did nothing; the file still said "Phase 0" |
+| 6 | The hardening verifier's ruleset branch had never once run | the script reported cleanly | It `SyntaxError`ed the first time a ruleset actually existed to read |
+
+And a seventh, found later by CI on a platform this was not developed on: `fs.mkdirSync(p, {
+recursive: true })` **never returns** when the target is on procfs, and the hook called it on
+every invocation. So `USEWARDEN_HOME` anywhere under `/proc` made the hook block forever on
+Linux — and a blocked hook is a blocked agent. macOS has no `/proc`, so it passed locally and on
+the macOS CI leg and stalled all three Linux legs. The test that should have caught it asserted
+"an unreadable `USEWARDEN_HOME` fails OPEN rather than crashing the agent"; the assertion was
+right and the platform hid it. It is fixed, the fix cannot use a watchdog (the block is inside a
+synchronous syscall, so no timer in that process gets a turn), and the regression test now
+asserts a **latency bound** on the real hook subprocess rather than only an exit code.
+
+Five of the first six share one shape: **a guardian that reports it is running while it is not.**
+The seventh is its close cousin — a guardian that stops you working while reporting nothing at
+all. That
+is the failure mode usewarden is built around, and it is why `usewarden status` is loud, exits
+non-zero when it is not protecting you, and verifies a hash of its own registered hooks on every
+run rather than trusting that it registered them once.
+
+The [`verification/`](verification/) directory holds the captured transcripts, including
+[an A/B test](verification/live/08-ab-removal.txt) that removes usewarden's hooks, re-runs the
+identical sabotage, and shows the attack succeeding.
 
 ---
 
 ## 90-second quickstart
 
 ```bash
-npx usewarden init      # detects your agents, shows you a diff, registers hooks
-npx usewarden demo      # see a real incident card without waiting for organic drift
-npx usewarden status    # is usewarden actually protecting you right now?
+node dist/src/cli.js init      # detects your agents, shows you a diff, registers hooks
+node dist/src/cli.js demo      # see a real incident card without waiting for organic drift
+node dist/src/cli.js status    # is usewarden actually protecting you right now?
 ```
 
-`usewarden init` never writes anything without showing you the exact diff first, takes a timestamped
-backup before it touches a byte, and is fully reversible:
+**Start with `demo`.** It runs a safe, simulated violation against a throwaway path and prints a
+real incident card — the same code path a live block takes, so you see exactly what your agent
+would see, without having to provoke your own tooling into misbehaving.
+
+`init` never writes anything without showing you the exact diff first, takes a timestamped backup
+before it touches a byte, and is fully reversible:
 
 ```bash
 usewarden uninstall         # removes usewarden's hook entries, leaves your own edits alone
 usewarden restore-configs   # restores your configs byte-identically from the backup
 ```
+
+`status` is the one to trust. It re-reads every agent config, compares usewarden's hook entries
+against a recorded hash, and reports **PROTECTED**, **UNPROTECTED** or **TAMPERED** — exiting
+non-zero for the last two, so it works in a shell prompt or a CI step.
 
 ---
 
@@ -53,6 +103,41 @@ process so it never makes your agent wait. It can only ever *warn*.
 
 The ordering is fixed and not configurable: Layer 1 runs first, Layer 2 can only add findings,
 and **Layer 2 being down can never disable Layer 1**.
+
+### Layer 2 providers — verification status
+
+Usewarden picks the first available: `ANTHROPIC_API_KEY`, then `OPENAI_API_KEY`, then
+`GEMINI_API_KEY`, then an authenticated `claude` or `gemini` CLI already on your PATH.
+
+| Provider | Model | Contract-tested | Proved against the live API |
+|---|---|---|---|
+| Local `claude` CLI | your existing subscription | yes | **yes** — 12 real sessions, 2 live drift catches (`verification/live/`) |
+| Local `gemini` CLI | your existing subscription | yes | partial — registration and hook execution proved live; no model-driven call (no key on the build machine) |
+| Anthropic API | `claude-haiku-4-5` | yes — 40 tests | **UNVERIFIED-LIVE** |
+| OpenAI API | `gpt-5-mini` | yes — 40 tests | **UNVERIFIED-LIVE** |
+| Gemini API | `gemini-3.7-flash` | yes — 40 tests | **UNVERIFIED-LIVE** |
+
+**UNVERIFIED-LIVE means exactly what it says.** `tests/judge-providers.test.ts` drives each
+adapter against that vendor's published request and response schema with the transport stubbed,
+and asserts the request shape, the response parsing, the token and cost accounting, and fail-open
+behaviour on auth failure, rate limit, timeout, 5xx and malformed responses. What it cannot prove
+is that the vendor still speaks that protocol today — a renamed usage field or a retired model id
+looks identical to a passing test suite. One command settles it per provider:
+
+```bash
+export OPENAI_API_KEY=...        # or ANTHROPIC_API_KEY / GEMINI_API_KEY
+usewarden judge-check            # one real call, prints provider, tokens, cost, verdict, PASS/FAIL
+```
+
+The full procedure is `ops/JUDGE-LIVE-CHECK.md`. These rows will say "verified <date>" when it
+has been run, and not before.
+
+**A judge that is down is not a guardrail that is down.** Every failure above fails OPEN with a
+loud warning, and Layer 1 keeps running unchanged. The dollar figures are estimates at prices
+recorded on a dated line in `src/engine/judge.ts`; token counts are always exact, and usewarden
+warns when its own price table is more than 120 days old rather than quietly reporting a stale
+number.
+
 
 ### The defaults
 
@@ -255,10 +340,44 @@ Node **≥ 22.13.0** (Node 22 *Jod* and 24 *Krypton* are the Active LTS lines; 2
 ```bash
 npm install
 npm run build
-npm test                     # 195 tests, no network, no API keys required
-./scripts/make-fixture.sh    # build the sabotage fixture
-./scripts/screenshot.sh      # render the dashboard with a headless browser
+npm test                          # 247 tests, no network, no API keys required
+./scripts/verify-all.sh           # every gate: build, both Node lines, fixtures, screenshots, CLI smoke
+./scripts/make-fixture.sh         # build the sabotage fixture
+./scripts/screenshot-synthetic.sh # re-render the published screenshots
+./scripts/pre-public-scan.sh      # the secret/identity scan that gates every push
 ```
+
+CI runs the full suite on **Node 22 LTS, 24 LTS and 25** on every pull request. There are no
+runtime dependencies to install; `npm install` fetches TypeScript and the Node type definitions
+and nothing else.
+
+## The dashboard
+
+`usewarden dashboard` serves a read-only page on `127.0.0.1` behind a token that changes every
+run. No external assets, no CORS, no mutating methods.
+
+![The usewarden dashboard: counters for actions blocked, drift warnings and live catches, a getting-started checklist, per-agent protection status, and the incident wall](assets/dashboard.png)
+
+## How the screenshots are made
+
+Both images above are rendered by a real headless browser from **real captured incidents** —
+`scripts/screenshot-synthetic.sh`, which `verify-all.sh` runs on every full pass. What is real
+and what is not, stated precisely, because "screenshot" and "evidence" are not the same word:
+
+- **Real:** every incident, its rule id, its layer, its reason text, its timestamp, and the
+  counters. They come from this repository's actual live agent sessions and sabotage runs.
+- **Rewritten:** absolute paths only. The capture runs under a throwaway `HOME` containing a
+  synthetic project, so what renders is `~/dev/acme-api` rather than a real machine's layout. Rows
+  captured before the project was renamed also have the old product name substituted in their
+  reason text.
+- **Filtered:** the incident wall shows the catches from real agent sessions. The demo and
+  clean-machine-simulation entries are excluded — they are the same four blocks repeated once per
+  run of the verification harness, and eight copies of them tell you nothing.
+
+Usewarden also collapses `$HOME` to `~` in the dashboard and in every incident card. That is a
+product behaviour, not a capture trick: these are the surfaces people screenshot into issues and
+chat, and a tool whose pitch is that it does not exfiltrate your paths should not print your
+account name into every image you share.
 
 ## License
 

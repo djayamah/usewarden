@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentId, IntegrityRecord } from '../types.js';
 import { backupsDir, ensureHome, usewardenHome } from '../paths.js';
-import { sha256 } from '../util.js';
+import { mkdirpSafe, sha256 } from '../util.js';
 import { detectAgents, detectAllScopes, type Detection, type Scope } from './detect.js';
 import { openCodePlugin, planFor, USEWARDEN_TAG } from './entries.js';
 import { isDirty, previewDiff, readJsonFile, serialize, type JsonFile } from './jsonfile.js';
@@ -270,7 +270,7 @@ export function applyInit(changes: PlannedChange[], store: Store): InitResult {
   }
 
   const dir = path.join(backupsDir(), timestamp());
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  mkdirpSafe(dir);
 
   // G1: every backup is on disk before the first config write.
   const manifest: Record<string, { backup: string | null; existed: boolean; sha256: string | null }> = {};
@@ -291,7 +291,7 @@ export function applyInit(changes: PlannedChange[], store: Store): InitResult {
 
   for (const c of real) {
     try {
-      fs.mkdirSync(path.dirname(c.configPath), { recursive: true });
+      mkdirpSafe(path.dirname(c.configPath), 0o755);
       fs.writeFileSync(c.configPath, c.after, { mode: 0o600 });
     } catch (e) {
       errors.push(`${c.configPath}: ${(e as Error).message}`);
@@ -353,7 +353,7 @@ export function restoreConfigs(dir?: string): RestoreResult {
         continue;
       }
       const bytes = fs.readFileSync(path.join(d, m.backup!));
-      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      mkdirpSafe(path.dirname(configPath), 0o755);
       fs.writeFileSync(configPath, bytes);
       const now = sha256(fs.readFileSync(configPath));
       out.restored.push({ path: configPath, action: 'restored', byteIdentical: now === m.sha256 });

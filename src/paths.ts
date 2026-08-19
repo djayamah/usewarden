@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
+import { mkdirpSafe } from './util.js';
 
 /**
  * All usewarden state lives under one root so `usewarden uninstall` is a single, auditable removal.
@@ -20,8 +21,8 @@ export function logPath(): string { return path.join(usewardenHome(), 'usewarden
 
 export function ensureHome(): string {
   const h = usewardenHome();
-  fs.mkdirSync(h, { recursive: true, mode: 0o700 });
-  fs.mkdirSync(backupsDir(), { recursive: true, mode: 0o700 });
+  mkdirpSafe(h);
+  mkdirpSafe(backupsDir());
   return h;
 }
 

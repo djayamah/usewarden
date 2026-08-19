@@ -1,0 +1,40 @@
+name: Agent support
+description: Add or fix support for an AI coding agent
+labels: ["adapter"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Usewarden's per-agent support is one entry in `src/adapters/` plus one row in
+        `docs/HOOK-MATRIX.md`. The matrix deliberately distinguishes **UNVERIFIED-LOCALLY** ("we
+        wrote the adapter from the docs") from **VERIFIED-LIVE** ("we watched it fire"), because
+        three of this project's registration bugs were invisible until an agent actually ran.
+  - type: input
+    id: agent
+    attributes:
+      label: Which agent, and which version
+    validations:
+      required: true
+  - type: input
+    id: docs
+    attributes:
+      label: Link to that agent's hook documentation
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: What does its hook contract look like?
+      description: |
+        Config file location and shape, whether it takes `command` + `args` or a command string,
+        the timeout field and **its units**, and the exact JSON it expects back to deny an action.
+        Units and the deny dialect are where every previous adapter went wrong.
+    validations:
+      required: true
+  - type: textarea
+    id: live
+    attributes:
+      label: Have you seen it fire live?
+      description: A captured transcript is worth more than anything else in this form.
+    validations:
+      required: false

@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { AgentId, Incident, IntegrityRecord, NormalizedEvent } from './types.js';
 import { dbPath, ensureHome } from './paths.js';
-import { sha256 } from './util.js';
+import { mkdirpSafe, sha256 } from './util.js';
 
 /**
  * `node:sqlite` is loaded through createRequire rather than a static ESM import.
@@ -117,7 +117,7 @@ export class Store {
     this.file = file ?? dbPath();
     if (this.file !== ':memory:') {
       ensureHome();
-      fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
+      mkdirpSafe(path.dirname(this.file));
     }
     this.db = new (loadSqlite().DatabaseSync)(this.file);
     // WAL: hook processes from several agents write to this DB concurrently.

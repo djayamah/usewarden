@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import type { NormalizedEvent, Verdict } from '../types.js';
 import { usewardenHome } from '../paths.js';
 import { nodePath, usewardenScriptPath } from '../install/installer.js';
+import { mkdirpSafe } from '../util.js';
 
 /**
  * Layer 2 runs OUT OF BAND.
@@ -35,7 +36,7 @@ export interface JudgePayload {
 export function dispatchJudge(payload: JudgePayload): string | null {
   try {
     const dir = pendingDir();
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    mkdirpSafe(dir);
     const file = path.join(dir, `${randomUUID()}.json`);
     fs.writeFileSync(file, JSON.stringify(payload), { mode: 0o600 });
 

@@ -530,3 +530,106 @@ Format: `[decision — rationale — confidence 1-10 — what would change it]`
   branches, opening PRs, editing rulesets). Reporting it as PASS "because it is needed" is how a
   hardening report becomes decorative. — confidence 10 — would change once the founder rotates
   the token to read-only after the launch.**
+
+- **[D-059] Two of the three metered providers were shipping with WRONG PRICES and one with a
+  retired model id, and nothing anywhere said so — rationale: the figures were checked against the
+  vendors' current published pricing while building the contract suite. `gpt-5-mini` had moved
+  from $0.25/$2.00 to $0.125/$1.00; `gemini-2.5-flash` at $0.30/$2.50 had been superseded by
+  `gemini-3.7-flash` at $0.75/$3.75. Anthropic's `claude-haiku-4-5` at $1.00/$5.00 was still
+  correct. The fix is not just new numbers: each provider now carries a `pricedOn` date and a
+  `pricingSource` URL, and `pricingStaleness()` emits `JUDGE_PRICING_STALE` once the figures are
+  more than 120 days old. A hard-coded price is a fact with a shelf life, and a cost ledger that
+  is confidently wrong is worse than one that says it might be. Token counts are recorded exactly
+  and are never estimated, so a stale price can make the USD column wrong but can never corrupt
+  the usage it is derived from. — confidence 9 — would change if the vendors published a
+  machine-readable price feed, which would let the table be fetched rather than dated.**
+
+- **[D-060] The provider contract suite stubs `globalThis.fetch` rather than mocking usewarden's
+  own transport — rationale: mocking an internal seam would prove usewarden calls its own wrapper
+  correctly, which is not the thing in doubt. Stubbing the platform's `fetch` puts the assertions
+  on the actual bytes: the URL, the method, the header names, and the JSON body, checked against
+  each vendor's published schema. Forty tests cover request shape, response parsing, token and
+  cost accounting into the ledger, and fail-open behaviour on auth failure, rate limit, timeout,
+  5xx and malformed 200s, for all three providers. Three assertions are security controls rather
+  than contract checks: the API key must never appear in a warning string, the Gemini key must
+  never be a query parameter (URLs reach proxy and CDN logs), and a 400 that echoes the request
+  must not paste the transcript into a terminal. — confidence 9 — n/a.**
+
+- **[D-061] The metered providers are labelled UNVERIFIED-LIVE in the README and the hook matrix,
+  and stay that way until a real key has been used — rationale: a contract test proves usewarden
+  holds up its end of the protocol. It cannot prove the vendor still holds up theirs; an API
+  version bump, a renamed usage field or a retired model id all look identical to a green suite.
+  This is the same distinction the rest of the project already enforces — fixtures prove a check
+  works, only production proves it fires — and it would be inconsistent to relax it for the one
+  subsystem that talks to somebody else's server. `usewarden judge-check` was added so settling it
+  is one command per provider rather than a hand-built payload: it runs the whole path on a
+  scenario whose correct answer is not in doubt and prints which provider answered, the latency,
+  the exact tokens, the cost, whether the ledger moved by the same amount, and PASS/FAIL.
+  Verified working end to end against the local-claude judge: drift detected at confidence 0.95.
+  — confidence 10 — would change on a passing `judge-check` per provider, recorded in
+  `verification/judge-live-check.txt`.**
+
+- **[D-062] Non-2xx provider responses now produce a classified, redacted message instead of
+  `HTTP <status>` — rationale: `HTTP 401` and `HTTP 429` fail open identically but mean opposite
+  things to the user; one is a misconfiguration that no amount of retrying fixes, the other is a
+  blip. `describeHttpFailure()` labels them AUTH / RATE_LIMIT / PROVIDER_DOWN / REQUEST_REJECTED,
+  quotes the vendor's error TYPE but never its prose (a 400 frequently echoes the request back,
+  and the request contains the transcript window), runs the result through `redact()`, and caps it
+  so a hostile error body cannot flood a terminal. — confidence 9 — n/a.**
+
+- **[D-063] The provider contract suite's fake API keys were reshaped so they no longer match any
+  scanner's credential pattern — rationale: the first version used the vendors' real prefixes
+  (`sk-ant-`, `sk-proj-`, `AIza`) for realism, and this repository's own pre-publication scanner
+  flagged two of them as leaked credentials on the very next run. It was right to. A scanner
+  cannot distinguish a convincing fake from the real thing, and neither can GitHub push
+  protection, nor anyone grepping the repository in a year. Nothing in the tests depends on the
+  shape — every assertion is about where the string travels, not what it looks like — so the
+  realism bought nothing and cost a permanent false positive in a security tool's own repo. Same
+  class as the `sk_test_FAKE…` Stripe bait in the sabotage fixture, fixed the same way. —
+  confidence 10 — n/a.**
+
+- **[D-064] Recording a process failure of my own: the publication scan was run in a shell chain
+  ending in `| tail -3`, so the pipeline's exit status was `tail`'s, the `&&` guard did not fire,
+  and a branch was pushed to the public repository while the scan said BLOCKED. The contents were
+  the two synthetic strings above, so nothing was exposed — but the gate did not hold, and it did
+  not hold for the most ordinary reason there is. The scan is now run as its own command with its
+  exit status read directly, never through a pipe. This is exactly the failure the product keeps
+  documenting: a check that ran, reported correctly, and was then not acted on because something
+  in the plumbing swallowed the signal. — confidence 10 — n/a.**
+
+- **[D-065] `fs.mkdirSync(p, { recursive: true })` never returns when the target sits on procfs,
+  and usewarden's hook called it on every invocation — so `USEWARDEN_HOME` pointing anywhere under
+  `/proc` made the hook BLOCK FOREVER on Linux, which means the agent blocked forever. Fixed with
+  `mkdirpSafe()` — rationale: this is the worst failure this product can have. The hook sits in
+  the agent's critical path and the entire promise is that it fails OPEN; a hang fails neither
+  open nor closed, it just stops the user's work while looking like nothing at all. The existing
+  test asserted "an unreadable USEWARDEN_HOME fails OPEN rather than crashing the agent" and it
+  passed on macOS, which has no `/proc` — the assertion was right and the platform hid the bug.
+  A watchdog timer cannot rescue this: the block is inside a synchronous syscall, so no timer in
+  that process ever gets a turn. `mkdirpSafe()` therefore never makes the call that can block —
+  it walks up to the nearest existing ancestor with `statSync` (which returns instantly even on
+  procfs), checks it is a writable directory, then creates each missing component with the
+  NON-recursive form, which fails fast with ENOENT. It also refuses `/proc`, `/sys` and `/dev` by
+  name, because "refusing to create /proc/x: /proc is a virtual filesystem" is a better message
+  than a timeout. Every recursive `mkdirSync` in `src/` now goes through it. Measured: before,
+  killed at 20s; after, exit 0 immediately. — confidence 9 — n/a.**
+
+- **[D-066] How it was found is the point: three CI legs on ubuntu stalled at the test step while
+  macOS and every local run passed. The first instinct was to theorise about detached children and
+  open sockets; that produced four wrong hypotheses in ten minutes. Starting a Linux VM and
+  reproducing it took three commands and produced the exact call. The lesson recorded here for the
+  next time: when a failure is platform-specific, reproduce on the platform before reasoning about
+  it. CI was also changed so the next stall names itself — `npm test` now carries
+  `--test-timeout=120000`, the job carries `timeout-minutes: 15`, and an `always()` step reports
+  stray processes and listening sockets. A test that hangs tells you nothing; a test that times
+  out tells you which one. — confidence 10 — n/a.**
+
+- **[D-067] The new SAB-16 tests assert a LATENCY BOUND, not just an exit code — rationale: the
+  property that matters is "usewarden cannot hang the agent", and only a deadline expresses it.
+  Four pathological `USEWARDEN_HOME` values are driven through the real hook subprocess with a
+  hard `timeout` and `killSignal`, and the test fails if the child had to be killed, if it exited
+  non-zero, or if it took more than 10 seconds. Every `spawnSync` in the sabotage file now carries
+  a timeout for the same reason: a hang must surface as a failing test, never as a stalled job.
+  The suite also asserts the sabotage landed first — that the probe locations really are
+  unusable — so a green result cannot come from a probe that was quietly fine. — confidence 9 —
+  n/a.**

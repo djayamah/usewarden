@@ -11,7 +11,16 @@ tests that prove them, in **[docs/THREAT-MODEL.md](docs/THREAT-MODEL.md)**.
 
 Use GitHub's private vulnerability reporting on this repository
 (*Security → Report a vulnerability*). That opens a private advisory thread visible only to the
-maintainers and to you.
+maintainers and to you. It is the preferred route: it needs no email round-trip and it produces
+the advisory record automatically.
+
+If you cannot use it, or you want the report encrypted, email:
+
+> **`SECURITY_CONTACT_PLACEHOLDER`**
+>
+> *(Maintainer: replace this line with the disclosure address before announcing the project.
+> Leaving the placeholder in place is deliberate — an address invented here would bounce, and a
+> bouncing security contact is worse than none.)*
 
 Please include:
 - usewarden version (`usewarden --version`), Node version, and OS;

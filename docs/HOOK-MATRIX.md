@@ -210,6 +210,26 @@ contract tests and by a real `usewarden hook gemini pre_tool` subprocess, not by
 
 ---
 
+## Layer 2 judge providers
+
+Layer 1 is the same code for every agent. Layer 2 talks to a model, and which model depends on
+what the machine has. Verification status per provider, using the same rule as the rest of this
+matrix — a row only says "live" if something actually ran:
+
+| Provider | Selected when | Contract-tested | Live |
+|---|---|---|---|
+| `local-claude` | `claude` is on PATH and authenticated | yes | **yes** — 12 sessions, 2 drift catches |
+| `local-gemini` | `gemini` is on PATH and authenticated | yes | partial — no key on the build machine |
+| `anthropic` | `ANTHROPIC_API_KEY` set | yes — `tests/judge-providers.test.ts` | **UNVERIFIED-LIVE** |
+| `openai` | `OPENAI_API_KEY` set | yes — `tests/judge-providers.test.ts` | **UNVERIFIED-LIVE** |
+| `gemini` | `GEMINI_API_KEY` set | yes — `tests/judge-providers.test.ts` | **UNVERIFIED-LIVE** |
+
+Selection order is fixed: Anthropic, then OpenAI, then Gemini, then a local CLI. `usewarden
+judge-check` makes one real call and prints which provider answered, what it cost, and whether
+the ledger moved by the same amount. Procedure: `ops/JUDGE-LIVE-CHECK.md`.
+
+---
+
 ## Normalization decisions
 
 Usewarden's internal event is agent-agnostic:
