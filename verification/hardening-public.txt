@@ -1,0 +1,113 @@
+=== USEWARDEN HARDENING VERIFICATION ===
+captured:  2026-08-19T16:24:35Z
+repo:      djayamah/usewarden
+package:   usewarden
+commit:    e6997f94764e6a612ed6ab5f804f72d2c8cca7e3
+
+STATUS      CONTROL                                              DETAIL
+----------- ---------------------------------------------------- ------
+PASS        gh CLI available and authenticated                   gh version 2.86.0 (2026-01-21)
+PASS        repository is PUBLIC (intended since 2026-08-19)     visibility=public
+PASS        default branch identified                            main
+PASS        branch ruleset is ACTIVE (not evaluate/disabled)     enforcement=active
+PASS        pull request required before merge                   rule: pull_request
+PASS        force pushes blocked                                 rule: non_fast_forward
+PASS        branch deletion blocked                              rule: deletion
+PASS        ADMIN BYPASS OFF (bypass_actors empty)               0 actors - applies to the owner too
+PASS        `release` environment exists                         the workflow references it
+PASS        required reviewer on `release`                       1 reviewer(s)
+PASS          -> self-review allowed (solo maintainer)           see ops/SETUP-RESEARCH.md section 3
+PASS        gh CLI token scopes visible                          Token scopes: 'gist', 'read:org', 'repo', 'workflow'
+FAIL        gh CLI token is not over-scoped                      write scopes present. Required for THIS setup; rotate to read-only or revoke once hardening is done - ops/SETUP-BY-HAND.md step 2
+UNVERIFIED  no classic PATs remain on the account                GitHub exposes no API to list a user's own PATs - MANUAL: github.com/settings/tokens
+PASS        release workflow present                             .github/workflows/release.yml
+PASS        workflow requests id-token: write (OIDC)             ok
+PASS        workflow permissions are minimal                     contents: read
+PASS        workflow gated on the `release` environment          ok
+PASS        provenance enabled on publish                        ok
+PASS        no NPM_TOKEN anywhere in the workflow                trusted publishing only (comments excluded)
+PASS        every action pinned to a commit SHA                  2 action(s), no tags
+PASS        .github/dependabot.yml present                       34 lines
+PASS        .github/CODEOWNERS present                           16 lines
+PASS        SECURITY.md present                                  82 lines
+PASS        LICENSE present                                      21 lines
+PASS        .npmrc present                                       6 lines
+PASS        dependabot honours a cooldown                        matches .npmrc min-release-age
+PASS        package.json has NO install scripts                  the ChainDrop mechanism is absent
+PASS        lockfile has NO install scripts                      every entry clean
+PASS        npm CLI >= 11.10.0 (min-release-age support)         11.19.0
+PASS        local npm min-release-age set                        7 days
+PASS        committed .npmrc pins min-release-age                min-release-age=7
+PASS        npm package name 'usewarden' is unclaimed            no package by that name on the registry
+UNVERIFIED  npm 'require 2FA and disallow tokens'                package 'usewarden' is not published yet - cannot be configured or checked
+UNVERIFIED  npm trusted publisher configured                     package 'usewarden' is not published yet - chicken-and-egg, see ops/SETUP-BY-HAND.md
+UNVERIFIED  npm account 2FA enabled                              npm exposes no API for another party to read your 2FA state - MANUAL: npmjs.com/settings/~/profile
+
+PASS 31    FAIL 1    UNVERIFIED 4
+
+UNVERIFIED means this script could not check the control. It is counted as a FAILURE.
+A control whose state is unknown is not a control. Each UNVERIFIED row names the manual
+step that settles it - see ops/SETUP-BY-HAND.md.
+
+=== NOT FULLY HARDENED: 1 failed, 4 could not be verified ===
+
+############################################################
+# BRANCH PROTECTION, PROVED BY ATTEMPTING
+############################################################
+
+=== BRANCH PROTECTION: PROVED BY ATTEMPTING, NOT BY READING SETTINGS ===
+captured: 2026-08-19T16:24:15Z
+repo:     djayamah/usewarden (public)
+actor:    the repository OWNER and sole admin - the account that bypass_actors would have
+          exempted if it were not empty. That is the point of the test: reading
+          'bypass_actors: []' out of the API only proves what the API says.
+
+--- ATTEMPT 1: ordinary direct push to main ---
+$ git push public HEAD:main
+  remote: error: GH013: Repository rule violations found for refs/heads/main.        
+  remote: Review all repository rules at https://github.com/djayamah/usewarden/rules?ref=refs%2Fheads%2Fmain        
+  remote: 
+  remote: - Changes must be made through a pull request.        
+  remote: 
+  To https://github.com/djayamah/usewarden.git
+   ! [remote rejected] HEAD -> main (push declined due to repository rule violations)
+  error: failed to push some refs to 'https://github.com/djayamah/usewarden.git'
+  exit: 1  (non-zero = rejected)
+
+--- ATTEMPT 2: FORCE push to main ---
+$ git push --force public HEAD:main
+  remote: error: GH013: Repository rule violations found for refs/heads/main.        
+  remote: Review all repository rules at https://github.com/djayamah/usewarden/rules?ref=refs%2Fheads%2Fmain        
+  remote: 
+  remote: - Changes must be made through a pull request.        
+  remote: 
+  To https://github.com/djayamah/usewarden.git
+   ! [remote rejected] HEAD -> main (push declined due to repository rule violations)
+  error: failed to push some refs to 'https://github.com/djayamah/usewarden.git'
+  exit: 1  (non-zero = rejected)
+
+--- ATTEMPT 3: DELETE main ---
+$ git push public :main
+  To https://github.com/djayamah/usewarden.git
+   ! [remote rejected] main (refusing to delete the current branch: refs/heads/main)
+  error: failed to push some refs to 'https://github.com/djayamah/usewarden.git'
+  exit: 1  (non-zero = rejected)
+
+--- what main actually points at, after all three attempts ---
+  01275ca59f25dd257189d8a2d14e8fef8ed83e77
+  unchanged from the published commit - nothing landed.
+
+--- the ruleset that did it ---
+  ruleset: protect-main   enforcement: active
+failed to parse jq expression (line 1, column 81)
+    "  bypass_actors: \(.bypass_actors | length)\n  rules: \([.rules[].type] | join(\", \"))"
+                                                                                    ^  unexpected token "\\"
+
+--- one honest caveat about attempt 3 ---
+  The deletion attempt was refused with "refusing to delete the current branch", which is
+  GitHub's default-branch guard answering before the ruleset's `deletion` rule got a turn.
+  So attempt 3 proves main cannot be deleted; it does not, on its own, prove the deletion
+  RULE is what stopped it. The rule is present and active (listed above) and would apply to
+  any other branch the ruleset covers. Attempts 1 and 2 are unambiguous.
+
+RESULT: PASS - direct push, force push and deletion are all rejected for the repository owner.
