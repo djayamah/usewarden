@@ -1,0 +1,51 @@
+=== USEWARDEN HARDENING VERIFICATION ===
+captured:  2026-08-19T13:38:43Z
+repo:      djayamah/usewarden
+package:   usewarden
+commit:    03c63809a6b929055c219785d0b32b43feaf59b9
+
+STATUS      CONTROL                                              DETAIL
+----------- ---------------------------------------------------- ------
+PASS        gh CLI available and authenticated                   gh version 2.86.0 (2026-01-21)
+PASS        repository is PRIVATE                                visibility=private
+PASS        default branch identified                            main
+FAIL        branch protection on main                            BLOCKED BY PLAN: GitHub Free does not allow branch protection on PRIVATE repos
+FAIL          -> pull request required before merge              not enforced
+FAIL          -> force pushes blocked                            not enforced
+FAIL          -> branch deletion blocked                         not enforced
+FAIL          -> ADMIN BYPASS OFF                                not enforced
+PASS        `release` environment exists                         the workflow references it
+FAIL        required reviewer on `release`                       0 reviewers - approval gate NOT active
+PASS        gh CLI token scopes visible                          Token scopes: 'gist', 'read:org', 'repo', 'workflow'
+FAIL        gh CLI token is not over-scoped                      write scopes present. Required for THIS setup; rotate to read-only or revoke once hardening is done - ops/SETUP-BY-HAND.md step 2
+UNVERIFIED  no classic PATs remain on the account                GitHub exposes no API to list a user's own PATs - MANUAL: github.com/settings/tokens
+PASS        release workflow present                             .github/workflows/release.yml
+PASS        workflow requests id-token: write (OIDC)             ok
+PASS        workflow permissions are minimal                     contents: read
+PASS        workflow gated on the `release` environment          ok
+PASS        provenance enabled on publish                        ok
+PASS        no NPM_TOKEN anywhere in the workflow                trusted publishing only (comments excluded)
+PASS        every action pinned to a commit SHA                  2 action(s), no tags
+PASS        .github/dependabot.yml present                       34 lines
+PASS        .github/CODEOWNERS present                           16 lines
+PASS        SECURITY.md present                                  82 lines
+PASS        LICENSE present                                      21 lines
+PASS        .npmrc present                                       6 lines
+PASS        dependabot honours a cooldown                        matches .npmrc min-release-age
+PASS        package.json has NO install scripts                  the ChainDrop mechanism is absent
+PASS        lockfile has NO install scripts                      every entry clean
+PASS        npm CLI >= 11.10.0 (min-release-age support)         11.19.0
+PASS        local npm min-release-age set                        7 days
+PASS        committed .npmrc pins min-release-age                min-release-age=7
+FAIL        npm package name 'usewarden' is available or ours       TAKEN by: qubyte <<email-redacted>>. Pick another name - see launch/NAME-CANDIDATES.md
+UNVERIFIED  npm 'require 2FA and disallow tokens'                cannot configure a package you do not own
+UNVERIFIED  npm trusted publisher configured                     cannot configure a package you do not own
+UNVERIFIED  npm account 2FA enabled                              npm exposes no API for another party to read your 2FA state - MANUAL: npmjs.com/settings/~/profile
+
+PASS 23    FAIL 8    UNVERIFIED 4
+
+UNVERIFIED means this script could not check the control. It is counted as a FAILURE.
+A control whose state is unknown is not a control. Each UNVERIFIED row names the manual
+step that settles it - see ops/SETUP-BY-HAND.md.
+
+=== NOT FULLY HARDENED: 8 failed, 4 could not be verified ===

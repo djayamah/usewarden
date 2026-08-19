@@ -1,0 +1,85 @@
+name: release
+
+# Publishes to npm using TRUSTED PUBLISHING (GitHub Actions OIDC).
+#
+# There is NO NPM_TOKEN in this repository, in Actions secrets, or on any developer machine.
+# A token that does not exist cannot be stolen, which was the initial access in both Mini
+# Shai-Hulud incidents (TanStack 2026-05-11, @antv 2026-05-19) and in ChainDrop (2026-08-04).
+#
+# The `release` environment gate is the control that breaks ChainDrop's amplification step.
+# Its operators pushed straight to `main` and let the project's own release workflow sign the
+# malware for them. Here, `main` cannot be pushed to directly (ruleset, no bypass actors), and
+# this workflow cannot run without a separate, deliberate human approval.
+#
+# Provenance is automatic under trusted publishing; `--provenance` is passed anyway as an
+# explicit statement of intent.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run every check and pack the tarball, but do not publish"
+        type: boolean
+        default: true
+
+# Minimum permissions. `id-token: write` is what lets Actions mint the OIDC token npm
+# exchanges for a short-lived credential. `contents: read` is needed to check out. Nothing else.
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # The protected environment: a required human reviewer must approve before this job starts.
+    environment: release
+    timeout-minutes: 15
+
+    steps:
+      # Every action is pinned to a COMMIT SHA, never a tag. A tag is mutable; a SHA is not.
+      # Repointing a tag at malicious code is a documented supply-chain technique.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node (LTS floor, matching package.json engines)
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.13.0'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing needs a recent npm; 11.10.0 is also the min-release-age floor.
+      - name: Ensure npm supports trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - name: Install (lockfile exactly, no scripts)
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Pre-publish check
+        run: ./scripts/pre-publish-check.sh
+
+      - name: Pack and show exactly what would be published
+        run: |
+          npm pack --dry-run
+          echo "::notice::Read the file list above before approving a real publish."
+
+      - name: Publish to npm (trusted publishing, OIDC)
+        if: ${{ inputs.dry_run == false }}
+        run: npm publish --provenance --access public
+
+      - name: Verify the published signatures
+        if: ${{ inputs.dry_run == false }}
+        run: npm audit signatures

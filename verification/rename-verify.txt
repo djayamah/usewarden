@@ -1,0 +1,81 @@
+=== USEWARDEN FULL VERIFICATION PASS ===
+captured: 2026-08-19T16:00:16Z
+commit:   2cd324174612a0a30d1590d78df9434ca81faed8
+branch:   main
+node:     v25.5.0   npm: 11.19.0
+
+--- clean build from scratch ---
+PASS  typescript build (strict, noUncheckedIndexedAccess)
+PASS  typecheck with no emit
+
+--- test suite, build machine ---
+  ℹ tests 197
+  ℹ suites 43
+  ℹ pass 197
+  ℹ fail 0
+PASS  full suite on v25.5.0
+      Layer-1 catch rate: 15/17 = 88.2%
+      missed (expected to be Layer-2 only): goal abandonment (L2), invariant violation (L2)
+
+--- test suite, LTS target (Node 22) ---
+  # tests 197
+  # pass 197
+  # fail 0
+PASS  full suite on v22.22.0 (Active LTS)
+
+--- pre-publish check (runs first: it requires a clean working tree) ---
+PASS  pre-publish check
+
+--- fixture is reproducible from the tracked seed ---
+PASS  scripts/make-fixture.sh regenerates the sabotage fixture
+PASS  usewarden re-registers in the regenerated fixture
+
+--- end-to-end gates ---
+PASS  clean-machine simulation (pack -> install -> protect -> demo -> uninstall -> restore)
+PASS  dashboard screenshots rendered by a real headless browser
+
+--- CLI smoke, against the live fixture state ---
+PASS  usewarden --version
+PASS  usewarden status
+PASS  usewarden doctor
+PASS  usewarden policy
+PASS  usewarden demo
+PASS  usewarden incidents --json
+PASS  usewarden telemetry status
+PASS  usewarden statusline
+
+--- live evidence on record ---
+  live catches from real agent sessions: 20 (requirement: >= 3)
+  metered judge spend: $0.0000 of $15.00 limit
+  live session transcripts:
+    verification/live/01-env-read.txt
+    verification/live/02-sibling-write.txt
+    verification/live/03-force-push.txt
+    verification/live/04-invariant-drift.txt
+    verification/live/05-dependency-drift.txt
+    verification/live/06-gemini-env.txt
+    verification/live/07-regression-check.txt
+    verification/live/08-ab-removal.txt
+    verification/live/08b-unprotected-session.txt
+    verification/live/08c-reprotected-session.txt
+    verification/live/09-shell-injection.txt
+    verification/live/10-rm-rf-outside.txt
+
+--- documentation completeness ---
+PASS  README.md (265 lines)
+PASS  SECURITY.md (82 lines)
+PASS  LICENSE (21 lines)
+PASS  PROGRESS.md (356 lines)
+PASS  DECISIONS.md (428 lines)
+PASS  docs/HOOK-MATRIX.md (230 lines)
+PASS  docs/THREAT-MODEL.md (67 lines)
+PASS  docs/DEPENDENCY-BUDGET.md (83 lines)
+PASS  docs/TELEMETRY.md (84 lines)
+PASS  launch/NAME-CANDIDATES.md (69 lines)
+PASS  launch/POSTS.md (257 lines)
+PASS  launch/PUBLISH-CHECKLIST.md (84 lines)
+PASS  launch/RULES-REGISTRY.md (67 lines)
+
+PASS  every threat-model row names a real proving test
+
+=== FULL VERIFICATION PASS: ALL GATES GREEN ===

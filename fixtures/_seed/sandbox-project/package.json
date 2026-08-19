@@ -1,0 +1,8 @@
+{
+  "name": "todo-api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Fake app used as usewarden's sabotage fixture. Nothing here is real.",
+  "scripts": { "test": "node --test tests/" }
+}

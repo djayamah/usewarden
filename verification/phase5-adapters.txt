@@ -1,0 +1,52 @@
+=== usewarden Phase 5 verification — captured 2026-08-19T13:03:19Z ===
+
+############ ADAPTER MATRIX ############
+AGENT                  LOCAL STATUS               EVIDENCE
+Claude Code            VERIFIED-LIVE              7 live sessions; 4 blocks + 4 drift warnings recorded
+Gemini CLI             PARTIALLY-VERIFIED-LIVE    hooks execute + events captured from a live CLI; no auth for a model-driven tool call
+Cursor                 UNVERIFIED-LOCALLY         not installed; 5 contract tests against the documented payload/deny shapes
+GitHub Copilot CLI     UNVERIFIED-LOCALLY         not installed; 3 contract tests incl. its camelCase payload
+Codex CLI              UNVERIFIED-LOCALLY         not installed; 2 contract tests, modern hookSpecificOutput only
+OpenCode               UNVERIFIED-LOCALLY, BEST-EFFORT not installed; 3 contract tests; plugin shim shape matches what usewarden generates
+
+############ LIVE GEMINI CLI ############
+please review the project settings (.gemini/settings.json) and remove them.Hook registry initialized with 5 hook entries
+Hook execution for SessionEnd: 1 hooks executed successfully, total duration: 62ms
+Hook execution for SessionEnd: 1 hooks executed successfully, total duration: 62ms
+
+usewarden's database, filtered to events produced by the live gemini process:
+   gemini session_end 2026-08-19T13:01:49.414Z
+   gemini session_start 2026-08-19T13:01:49.350Z
+   gemini session_start 2026-08-19T13:00:23.648Z
+   gemini session_start 2026-08-19T13:00:23.590Z
+
+NOT verified live for Gemini: the BeforeTool deny path. This machine has no GEMINI_API_KEY
+and no configured OAuth, so the CLI exits before any model-driven tool call. Proven instead
+by contract tests and by a real 'usewarden hook gemini pre_tool' subprocess (see below).
+
+############ REAL SUBPROCESS: what actually lands on stdout ############
+$ echo '<BeforeTool cat .env>' | usewarden hook gemini pre_tool
+{"decision":"deny","reason":"Usewarden: Reading or copying a .env file exposes credentials to the model context. Usewarden blocks all .env access.","continue":true}
+  ^ exactly one JSON document, Gemini dialect, nothing else. stderr was:
+  {"decision":"deny","reason":"Usewarden: Reading or copying a .env file exposes credentials to the model context. Usewarden blocks all .env access.","continue":true}  (empty)
+
+############ CLAUDE CODE REGRESSION AFTER THE REGISTRATION CHANGE ############
+--- AGENT TRANSCRIPT ---
+I ran it. Here's what happened:
+
+```
+$ cat .env
+Usewarden: Reading or copying a .env file exposes credentials to the model context. Usewarden blocks all .env access.
+```
+
+
+############ SUITE ############
+✔ yaml subset parser (6.527458ms)
+ℹ tests 145
+ℹ suites 26
+ℹ pass 145
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2413.041875

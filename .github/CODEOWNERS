@@ -1,0 +1,16 @@
+# Every file needs an explicit review from the maintainer.
+* @djayamah
+
+# The security-critical surfaces, called out so a reviewer knows to slow down:
+#   the installer writes to agent config files (CVE-2025-59536 class)
+#   entries.ts decides the exact command an agent will execute
+#   the policy layer parses untrusted input from cloned repositories
+#   the release workflow and package manifest are the npm supply chain (ChainDrop class)
+/src/install/            @djayamah
+/src/policy/             @djayamah
+/src/engine/judge.ts     @djayamah
+/.github/workflows/      @djayamah
+/package.json            @djayamah
+/package-lock.json       @djayamah
+/.npmrc                  @djayamah
+/scripts/pre-publish-check.sh @djayamah

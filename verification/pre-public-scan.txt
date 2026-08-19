@@ -1,0 +1,87 @@
+=== PUBLICATION SAFETY GATE ===
+
+The hard blocker in front of the visibility change. Two independent passes over EVERY object in
+the publication branch's history - not the working tree, and not `git log -p | grep`, which
+misses blobs reachable only from commits that were later amended.
+
+  pass 1  gitleaks 8.30.1, the purpose-built scanner, over the full commit graph
+  pass 2  scripts/pre-public-scan.sh's own pattern pass over every blob:
+            machine home paths, Windows home paths, Bonjour hostnames, Anthropic / OpenAI /
+            Google / GitHub / npm / AWS / Slack keys, private-key blocks, JWTs, generic
+            secret assignments, real email addresses, and a set of operator-identity strings
+            (hostname, account name, private project names) held in an UNTRACKED file so the
+            scanner does not itself publish what it is hunting for.
+
+WHAT THE FIRST RUN FOUND, on the original 23-commit history:
+  gitleaks         4  (fake-but-Stripe-shaped test values)
+  machine paths  423  in 22 files
+  hostname         8
+  private project 20  (incl. the scanner's own pattern file - a self-inflicted leak)
+  private vault    4
+  real email       2  (a third party's, captured incidentally from the npm registry)
+
+The history was NOT rewritten. Publication is from a single orphan commit on branch `publish`,
+built by scripts/build-publish-tree.sh, for the reason set out in DECISIONS.md D-051: GitHub
+keeps unreachable objects fetchable by SHA, so a rewritten branch on a public repository still
+exposes the old blobs, and this account's token does not carry `delete_repo`.
+
+WHAT THE SCANNER CAUGHT THAT REVIEW DID NOT:
+  * .usewarden-shot/ - a screenshot staging directory swept in by `git add -A`. 42 files whose
+    backup filenames encode the build machine's absolute paths.
+  * /private/tmp/claude-<uid>/-Users-<name>-dev-<repo>/... harness scratchpad paths, which
+    encode the home directory in a shape the first sanitiser pass did not recognise.
+  * the account name as a bare `ls -l` field, with no slash anywhere near it.
+
+Both runs below are against publish branch commit d22078c/8cde7c4 lineage, rebuilt from the
+sanitised HEAD. Output is redacted at source: this artifact is itself published.
+
+############################################################
+# SCAN 1 of 2 - publication branch `publish`
+# Two consecutive clean runs are required before any visibility change.
+############################################################
+
+=== PRE-PUBLIC SCAN ===
+captured:  2026-08-19T16:20:30Z
+repo:      ~/warden
+scope:     publish
+head:      9c19dd36385c4e8c73c1d8a0468faaba5e9337c1
+gitleaks:  8.30.1
+
+--- PASS 1: gitleaks, full history ---
+CLEAN    gitleaks: 0 findings across 1 commit(s)
+
+--- PASS 2: pattern scan, every blob in history ---
+         identity strings derived for this machine: 11 (not printed)
+         blobs scanned: 99 (of 123 objects)
+CLEAN    pattern scan: 0 findings
+
+objects considered: 124
+
+=== SCAN CLEAN - safe to publish this history ===
+SCAN 1 EXIT: 0
+
+############################################################
+# SCAN 2 of 2 - independent re-run, same branch, nothing changed in between
+############################################################
+
+=== PRE-PUBLIC SCAN ===
+captured:  2026-08-19T16:20:47Z
+repo:      ~/warden
+scope:     publish
+head:      9c19dd36385c4e8c73c1d8a0468faaba5e9337c1
+gitleaks:  8.30.1
+
+--- PASS 1: gitleaks, full history ---
+CLEAN    gitleaks: 0 findings across 1 commit(s)
+
+--- PASS 2: pattern scan, every blob in history ---
+         identity strings derived for this machine: 11 (not printed)
+         blobs scanned: 99 (of 123 objects)
+CLEAN    pattern scan: 0 findings
+
+objects considered: 124
+
+=== SCAN CLEAN - safe to publish this history ===
+SCAN 2 EXIT: 0
+
+RESULT: CLEAN TWICE IN A ROW. The visibility change is unblocked.

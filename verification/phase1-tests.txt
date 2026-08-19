@@ -1,0 +1,92 @@
+=== usewarden Phase 1 verification — captured 2026-08-19T12:18:57Z ===
+node: v25.5.0  npm: 11.19.0
+
+$ npm run build
+(tsc: no diagnostics)
+
+$ npm test
+
+> usewarden@0.1.0 test
+> node --test "dist/tests/**/*.test.js"
+
+(node:47695) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+▶ util
+  ✔ isInside resolves traversal rather than string-matching (1.121875ms)
+  ✔ globToRegExp handles ** and * (0.59025ms)
+  ✔ redact removes credential shapes (0.717584ms)
+✔ util (2.920583ms)
+▶ policy schema
+  ✔ unknown top-level key is a hard error (1.067041ms)
+  ✔ unknown nested key is a hard error (0.58825ms)
+  ✔ bad regex in a rule fails at load time, not silently at match time (0.841709ms)
+  ✔ out-of-range warn_pct rejected (0.431208ms)
+  ✔ absent keys inherit from the base policy (0.441209ms)
+✔ policy schema (3.470333ms)
+▶ layer 1 - deterministic checks
+  ✔ blocks a write outside allowed_paths (0.766667ms)
+  ✔ allows a write inside allowed_paths (0.579ms)
+  ✔ forbidden path beats allowed path (0.427583ms)
+  ✔ blocks curl-pipe-shell (0.647875ms)
+  ✔ blocks sudo (0.53325ms)
+  ✔ blocks .env read via cat (0.529167ms)
+  ✔ rm -rf inside the repo is allowed; outside is blocked (0.701833ms)
+  ✔ rm -rf with an unresolvable variable is treated as dangerous (0.375042ms)
+  ✔ force-push only fires for a protected branch (0.568625ms)
+  ✔ bare force-push uses the current branch, and unknown branch fails safe (0.366625ms)
+  ✔ context fill produces compact advice at the threshold (0.366917ms)
+  ✔ tokenize honours quotes (0.863875ms)
+  ✔ sibling repo detection (93.579625ms)
+  ✔ currentBranch reads .git/HEAD without shelling out (44.198417ms)
+✔ layer 1 - deterministic checks (144.651125ms)
+▶ tool name normalization
+  ✔ maps each agent vocabulary onto the canonical set (0.479125ms)
+✔ tool name normalization (0.505334ms)
+▶ store
+  ✔ dedupes a replayed event but keeps two genuine calls (1.192292ms)
+  ✔ counters and checklist advance on a live incident (0.714375ms)
+  ✔ survives a real file with WAL enabled (3.278916ms)
+✔ store (5.223791ms)
+▶ claude adapter
+  ✔ parses a real PreToolUse payload shape (0.546833ms)
+  ✔ renders a deny in Claude Code protocol exactly (0.514709ms)
+  ✔ ignores hook events usewarden does not handle (0.361ms)
+✔ claude adapter (1.45325ms)
+▶ end-to-end synthetic event flow
+  ✔ a forbidden write is denied, recorded, and counted (49.359916ms)
+  ✔ an in-scope write flows through with no incident (46.850208ms)
+✔ end-to-end synthetic event flow (96.26025ms)
+▶ yaml subset parser
+  ✔ parses nested maps, lists, and scalar types (1.433666ms)
+  ✔ parses a list of mappings (0.106958ms)
+  ✔ strips comments but keeps # inside quotes (0.058583ms)
+  ✔ rejects anchors (0.22575ms)
+  ✔ rejects aliases (0.05525ms)
+  ✔ rejects tags (0.051958ms)
+  ✔ rejects merge keys with alias (0.048292ms)
+  ✔ rejects merge keys bare (0.047583ms)
+  ✔ rejects multi-document (0.049792ms)
+  ✔ rejects tabs (0.366583ms)
+  ✔ rejects flow map (0.087542ms)
+  ✔ rejects flow seq (0.063625ms)
+  ✔ rejects block scalar (0.051042ms)
+  ✔ rejects duplicate keys instead of silently taking the last (0.059042ms)
+  ✔ refuses prototype-polluting keys (0.059583ms)
+  ✔ empty document is an empty map, not null (0.051667ms)
+✔ yaml subset parser (3.504917ms)
+ℹ tests 47
+ℹ suites 8
+ℹ pass 47
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 323.103083
+# tests 47
+# suites 8
+# pass 47
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 315.9765

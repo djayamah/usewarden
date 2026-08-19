@@ -1,0 +1,12 @@
+node:sqlite OK -> [{"k":1,"v":"ok"}]
+node v25.5.0
+(node:45410) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+journal_mode -> {"journal_mode":"memory"}
+run() -> {"changes":1,"last":1}
+all() -> [{"k":1,"v":"ok"}]
+has aggregate? function
+has function? function
+node v22.22.0
+v22.22.0 journal_mode -> {"journal_mode":"wal"} | busy_timeout -> {"timeout":5000}
+v25.5.0 journal_mode -> {"journal_mode":"wal"} | busy_timeout -> {"timeout":5000}

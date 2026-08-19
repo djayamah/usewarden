@@ -1,0 +1,51 @@
+{
+  "name": "usewarden",
+  "version": "0.1.0",
+  "description": "A firewall for your AI coding agents — watches every agent on your machine for drift, blocks out-of-scope actions, and shows you what it caught.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "usewarden": "dist/src/cli.js"
+  },
+  "exports": {
+    ".": "./dist/src/index.js"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "files": [
+    "dist/src",
+    "assets",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test \"dist/tests/**/*.test.js\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "verify": "npm run build && npm test"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "security",
+    "guardrails",
+    "hooks",
+    "claude-code",
+    "cursor",
+    "gemini-cli"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/djayamah/usewarden.git"
+  },
+  "homepage": "https://github.com/djayamah/usewarden#readme",
+  "bugs": {
+    "url": "https://github.com/djayamah/usewarden/issues"
+  }
+}

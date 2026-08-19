@@ -1,0 +1,152 @@
+=== CLEAN-MACHINE SIMULATION ===
+captured: 2026-08-19T13:19:31Z
+sim root: /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS
+node:     v25.5.0   npm: 11.19.0
+
+--- 0. npm pack (the real tarball, nothing hand-assembled) ---
+tarball: usewarden-0.1.0.tgz  ( 64K)
+
+--- tarball contents (every file that would reach a user) ---
+  package/LICENSE
+  package/README.md
+  package/dist/src/adapters/claude.js
+  package/dist/src/adapters/index.js
+  package/dist/src/adapters/others.js
+  package/dist/src/adapters/registry.js
+  package/dist/src/adapters/toolnames.js
+  package/dist/src/boot.js
+  package/dist/src/cli.js
+  package/dist/src/dashboard.js
+  package/dist/src/demo.js
+  package/dist/src/engine/detached.js
+  package/dist/src/engine/interventions.js
+  package/dist/src/engine/judge.js
+  package/dist/src/engine/layer1.js
+  package/dist/src/engine/pipeline.js
+  package/dist/src/hook.js
+  package/dist/src/index.js
+  package/dist/src/install/detect.js
+  package/dist/src/install/entries.js
+  package/dist/src/install/installer.js
+  package/dist/src/install/jsonfile.js
+  package/dist/src/paths.js
+  package/dist/src/policy/load.js
+  package/dist/src/policy/schema.js
+  package/dist/src/policy/yaml.js
+  package/dist/src/status.js
+  package/dist/src/statusline.js
+  package/dist/src/store.js
+  package/dist/src/telemetry.js
+  package/dist/src/term.js
+  package/dist/src/types.js
+  package/dist/src/util.js
+  package/package.json
+
+--- assert: no source, tests, fixtures or verification artifacts shipped ---
+  OK - only dist/, docs and metadata
+
+--- 1. fresh HOME=/var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home ---
+pre-existing ~/.claude/settings.json sha256: edbb7614931c0844ad262c638a5b63670fd3be62f89de5d4fbc8cfb9a750a3f7
+
+--- 2. install the tarball into a clean prefix ---
+  installed: /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/install/node_modules/.bin/usewarden
+  install scripts that ran: 1 package(s), 0 lifecycle scripts (usewarden declares none)
+
+--- 3. usewarden status on a machine where it has never run ---
+
+  usewarden  UNPROTECTED
+
+  AGENT               STATE        CONFIG
+  Claude Code (user)  UNPROTECTED  /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/.claude/settings.json
+
+  Claude Code: usewarden has never registered hooks for this agent. Run: usewarden init
+
+
+--- 4. usewarden init ---
+
+Applied. Backup: /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/.usewarden/backups/2026-08-19T13-19-33-335Z
+Undo with: usewarden restore-configs "/var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/.usewarden/backups/2026-08-19T13-19-33-335Z"
+
+┌────────────────────────────────────────────────────────────────────────┐
+│ Protection summary                                                     │
+├────────────────────────────────────────────────────────────────────────┤
+│ Claude Code: PROTECTED                                                 │
+│                                                                        │
+│ [x] Agents detected                                                    │
+│ [x] Policy created                                                     │
+│ [x] Protection verified                                                │
+│ [ ] First catch in a real session                                      │
+│                                                                        │
+│ Next: run "usewarden demo" to see a real incident card in under a minute. │
+└────────────────────────────────────────────────────────────────────────┘
+
+settings.json sha256 after init: 950de7ebf257ffd61806acabfed7f125cdf623c881ac31190fa08a3886e21ec4
+  (changed, as expected)
+
+--- unrelated keys survived? ---
+  OK - model, env and statusLine all intact; key order: ['model', 'env', 'statusLine', 'hooks']
+
+--- 5. usewarden status: PROTECTED ---
+
+  usewarden  PROTECTED
+
+  AGENT               STATE      CONFIG
+  Claude Code (user)  PROTECTED  /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/.claude/settings.json
+
+  exit code = 0  (0 == protected)
+
+--- 5b. the hook really blocks, invoked exactly as the agent would ---
+  {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Usewarden: Reading or copying a .env file exposes credentials to the model context. Usewarden blocks all .env access."}}
+
+--- 6. usewarden demo ---
+  │ BLOCKED  Blocked command: force-push-protected                                   │
+  ├──────────────────────────────────────────────────────────────────────────────────┤
+  │ when     2026-08-19 13:19:33Z                                                    │
+  │ agent    claude  fixture                                                         │
+  │ attempt  $ git push --force origin main                                          │
+  │ why      Usewarden: Force-push to a protected branch rewrites shared history. Push  │
+  │          to a feature branch and open a PR.                                      │
+  │ rule     commands.deny[1] (force-push-protected)  (layer 1)                      │
+  └──────────────────────────────────────────────────────────────────────────────────┘
+
+  All 4 demo violations were blocked.
+  These are recorded as fixture incidents, not live catches.
+  Your "first catch in a real session" box stays unticked until a real agent trips a rule.
+
+
+--- 7. usewarden uninstall ---
+Removed usewarden hook entries from:
+  /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/.claude/settings.json
+
+Original configs are still in /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/.usewarden/backups/2026-08-19T13-19-33-335Z - "usewarden restore-configs" puts them back byte-identically.
+
+sha256 before init:      edbb7614931c0844ad262c638a5b63670fd3be62f89de5d4fbc8cfb9a750a3f7
+sha256 after uninstall:  edbb7614931c0844ad262c638a5b63670fd3be62f89de5d4fbc8cfb9a750a3f7
+  PASS - byte-identical
+
+--- 8. usewarden restore-configs (the bigger hammer) ---
+  restore from /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/.usewarden/backups/2026-08-19T13-19-33-773Z
+  
+  OK   restored  /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/.claude/settings.json
+  
+  Every config restored byte-identically.
+sha256 after restore-configs: edbb7614931c0844ad262c638a5b63670fd3be62f89de5d4fbc8cfb9a750a3f7
+  PASS - byte-identical
+
+--- 9. nothing left outside usewarden's own paths ---
+files under the simulated HOME, excluding npm's own cache, the fixture, and this
+script's python bytecode cache:
+  ~/.claude/settings.json
+  ~/.usewarden/backups/2026-08-19T13-19-33-335Z/_var_folders_2n_bh92p8cn5zx3lwmqp8jmvttc0000gn_T_tmp.D7lH73UABS_home_.claude_settings.json
+  ~/.usewarden/backups/2026-08-19T13-19-33-335Z/_var_folders_2n_bh92p8cn5zx3lwmqp8jmvttc0000gn_T_tmp.D7lH73UABS_home_.claude_settings.json.diff
+  ~/.usewarden/backups/2026-08-19T13-19-33-335Z/manifest.json
+  ~/.usewarden/backups/2026-08-19T13-19-33-773Z/_var_folders_2n_bh92p8cn5zx3lwmqp8jmvttc0000gn_T_tmp.D7lH73UABS_home_.claude_settings.json
+  ~/.usewarden/backups/2026-08-19T13-19-33-773Z/_var_folders_2n_bh92p8cn5zx3lwmqp8jmvttc0000gn_T_tmp.D7lH73UABS_home_.claude_settings.json.diff
+  ~/.usewarden/backups/2026-08-19T13-19-33-773Z/manifest.json
+  ~/.usewarden/usewarden.db
+  ~/.usewarden/usewarden.yaml
+
+  ASSERTED: usewarden wrote nothing outside ~/.usewarden (its own state) and
+  ~/.claude/settings.json (the one agent config it was asked to register in).
+
+=== CLEAN-MACHINE SIMULATION PASSED ===
