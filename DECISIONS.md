@@ -495,3 +495,38 @@ Format: `[decision — rationale — confidence 1-10 — what would change it]`
   are the same four blocks repeated once per run of the verification harness. The README says
   this next to the image. — confidence 8 — would change if a reader reasonably read the caption
   as implying the paths were captured verbatim; the caption is therefore explicit.**
+
+- **[D-055] `verify-hardening.sh`'s ruleset branch had a latent syntax bug that only surfaced the
+  first time the repository was actually hardened — rationale: the block used `eval "$(… | python3
+  -c "…")"`, and bash 3.2 (still `/bin/bash` on macOS) parses nested double quotes inside a
+  command substitution inside an `eval` differently enough that the set-comprehension braces came
+  out mangled. Until today no ruleset existed, so that branch had never executed: the script had
+  been exercised only on its failure path. Both `eval` blocks now write their python to a file
+  and source the result. This is the same class of defect the product keeps finding — a check
+  that reports confidently right up until the moment it is asked to do the thing it exists for. —
+  confidence 9 — n/a.**
+
+- **[D-056] `verify-hardening.sh` now asserts the repository is PUBLIC, where it previously
+  asserted PRIVATE — rationale: the founder took the publication decision on 2026-08-19, so
+  public is the intended state, and a check still testing the old intent would report a FAIL for
+  exactly the thing that was supposed to happen. Public is also the precondition for the two
+  controls GitHub Free refuses on private repositories, both of which applied on the first
+  re-run. — confidence 10 — n/a.**
+
+- **[D-057] Branch protection is proved by ATTEMPTING a push as the repository owner, not by
+  reading `bypass_actors: []` back out of the API — rationale: reading the setting proves what
+  the API says, not what the server does, and the owner is precisely the actor an admin-bypass
+  hole would exempt. Direct push, force push and branch deletion were all rejected, exit 1, and
+  `main` still points at the published commit. One honest caveat is recorded in the artifact: the
+  deletion attempt was refused by GitHub's default-branch guard ("refusing to delete the current
+  branch") before the ruleset's `deletion` rule got a turn, so attempt 3 proves main cannot be
+  deleted but does not on its own prove which control stopped it. Attempts 1 and 2 are
+  unambiguous. — confidence 10 — n/a.**
+
+- **[D-058] The one remaining hardening FAIL — the `gh` CLI token carrying `repo` and `workflow`
+  scopes — is left FAILING rather than waved through, and is handed to the founder as a manual
+  action. Rotating or revoking a token is a credentials operation, which this run is forbidden
+  from performing, and the scopes are genuinely required by the work still in flight (pushing
+  branches, opening PRs, editing rulesets). Reporting it as PASS "because it is needed" is how a
+  hardening report becomes decorative. — confidence 10 — would change once the founder rotates
+  the token to read-only after the launch.**

@@ -20,6 +20,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$ROOT"
 
 PASS=0; FAIL=0; UNVERIFIED=0
+VTMP="$(mktemp -d)"; trap 'rm -rf "$VTMP"' EXIT
 
 row() { # row STATUS "control" "detail"
   printf '%-11s %-52s %s\n' "$1" "$2" "$3"
@@ -66,10 +67,14 @@ if [ $GH_OK -eq 1 ]; then
     row UNVERIFIED "repository reachable" "GET repos/$REPO_SLUG returned nothing"
   else
     VIS="$(printf '%s' "$REPO_JSON" | python3 -c "import json,sys;print(json.load(sys.stdin).get('visibility'))")"
-    if [ "$VIS" = "private" ]; then
-      row PASS "repository is PRIVATE" "visibility=$VIS"
+    # The founder took the decision to publish on 2026-08-19. Before that this row asserted
+    # PRIVATE; it now asserts PUBLIC, because "public" is the intended state and a check that
+    # still tested the old intent would report a FAIL for the thing that was supposed to happen.
+    # It is also a precondition for the two controls GitHub Free refuses on private repos.
+    if [ "$VIS" = "public" ]; then
+      row PASS "repository is PUBLIC (intended since 2026-08-19)" "visibility=$VIS"
     else
-      row FAIL "repository is PRIVATE" "visibility=$VIS - nothing is supposed to be public yet"
+      row FAIL "repository is PUBLIC" "visibility=$VIS - branch protection and required reviewers are unavailable on GitHub Free while it is private"
     fi
     DEFBR="$(printf '%s' "$REPO_JSON" | python3 -c "import json,sys;print(json.load(sys.stdin).get('default_branch'))")"
     row PASS "default branch identified" "$DEFBR"
@@ -96,16 +101,25 @@ rs=json.load(sys.stdin)
 sys.exit(0 if isinstance(rs,list) and len(rs)>0 else 1)" 2>/dev/null; then
     RSID="$(printf '%s' "$RS_RAW" | python3 -c "import json,sys;print(json.load(sys.stdin)[0]['id'])")"
     RSD="$(gh api "repos/$REPO_SLUG/rulesets/$RSID" 2>/dev/null)"
-    eval "$(printf '%s' "$RSD" | python3 -c "
+    # The python goes into a FILE, not into `python3 -c "..."` inside `eval "$( ... )"`.
+    # Nested double quotes inside a command substitution inside an eval are parsed differently
+    # by bash 3.2 (which is what /bin/bash still is on macOS) and the set-comprehension braces
+    # came out of it mangled - the block SyntaxError'd the first time this repository was
+    # hardened for real, because until then no ruleset existed and this branch had never run.
+    cat > "$VTMP/rs.py" <<'RSPY'
 import json,sys
 d=json.load(sys.stdin)
 types={r['type'] for r in d.get('rules',[])}
-print(f\"RS_ENF={d.get('enforcement')}\")
-print(f\"RS_BYPASS={len(d.get('bypass_actors') or [])}\")
-print(f\"RS_PR={'yes' if 'pull_request' in types else 'no'}\")
-print(f\"RS_FF={'yes' if 'non_fast_forward' in types else 'no'}\")
-print(f\"RS_DEL={'yes' if 'deletion' in types else 'no'}\")
-")"
+print("RS_ENF=%s" % d.get('enforcement'))
+print("RS_BYPASS=%d" % len(d.get('bypass_actors') or []))
+print("RS_PR=%s" % ('yes' if 'pull_request' in types else 'no'))
+print("RS_FF=%s" % ('yes' if 'non_fast_forward' in types else 'no'))
+print("RS_DEL=%s" % ('yes' if 'deletion' in types else 'no'))
+RSPY
+    printf '%s' "$RSD" | python3 "$VTMP/rs.py" > "$VTMP/rs.env" 2>/dev/null || true
+    RS_ENF=""; RS_BYPASS=""; RS_PR=""; RS_FF=""; RS_DEL=""
+    # shellcheck disable=SC1090
+    . "$VTMP/rs.env"
     [ "$RS_ENF" = "active" ] && row PASS "branch ruleset is ACTIVE (not evaluate/disabled)" "enforcement=$RS_ENF" \
                              || row FAIL "branch ruleset is ACTIVE" "enforcement=$RS_ENF"
     [ "$RS_PR"  = "yes" ] && row PASS "pull request required before merge" "rule: pull_request" \
@@ -157,15 +171,19 @@ if [ $GH_OK -eq 1 ]; then
     row FAIL "  -> required reviewer configured" "no environment"
   else
     row PASS "\`release\` environment exists" "the workflow references it"
-    eval "$(printf '%s' "$ENV_RAW" | python3 -c "
+    cat > "$VTMP/env.py" <<'ENVPY'
 import json,sys
 d=json.load(sys.stdin)
 rules=d.get('protection_rules') or []
 rev=[r for r in rules if r.get('type')=='required_reviewers']
 n=sum(len(r.get('reviewers') or []) for r in rev)
-print(f'ENV_REV={n}')
-print(f\"ENV_SELF={str(any(r.get('prevent_self_review') for r in rev)).lower()}\")
-")"
+print("ENV_REV=%d" % n)
+print("ENV_SELF=%s" % str(any(r.get('prevent_self_review') for r in rev)).lower())
+ENVPY
+    printf '%s' "$ENV_RAW" | python3 "$VTMP/env.py" > "$VTMP/env.env" 2>/dev/null || true
+    ENV_REV=0; ENV_SELF=false
+    # shellcheck disable=SC1090
+    . "$VTMP/env.env"
     if [ "${ENV_REV:-0}" -gt 0 ]; then
       row PASS "required reviewer on \`release\`" "$ENV_REV reviewer(s)"
       [ "$ENV_SELF" = "true" ] && row PASS "  -> self-review prevented" "prevent_self_review=true" \

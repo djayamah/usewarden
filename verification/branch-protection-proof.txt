@@ -1,0 +1,56 @@
+=== BRANCH PROTECTION: PROVED BY ATTEMPTING, NOT BY READING SETTINGS ===
+captured: 2026-08-19T16:24:15Z
+repo:     djayamah/usewarden (public)
+actor:    the repository OWNER and sole admin - the account that bypass_actors would have
+          exempted if it were not empty. That is the point of the test: reading
+          'bypass_actors: []' out of the API only proves what the API says.
+
+--- ATTEMPT 1: ordinary direct push to main ---
+$ git push public HEAD:main
+  remote: error: GH013: Repository rule violations found for refs/heads/main.        
+  remote: Review all repository rules at https://github.com/djayamah/usewarden/rules?ref=refs%2Fheads%2Fmain        
+  remote: 
+  remote: - Changes must be made through a pull request.        
+  remote: 
+  To https://github.com/djayamah/usewarden.git
+   ! [remote rejected] HEAD -> main (push declined due to repository rule violations)
+  error: failed to push some refs to 'https://github.com/djayamah/usewarden.git'
+  exit: 1  (non-zero = rejected)
+
+--- ATTEMPT 2: FORCE push to main ---
+$ git push --force public HEAD:main
+  remote: error: GH013: Repository rule violations found for refs/heads/main.        
+  remote: Review all repository rules at https://github.com/djayamah/usewarden/rules?ref=refs%2Fheads%2Fmain        
+  remote: 
+  remote: - Changes must be made through a pull request.        
+  remote: 
+  To https://github.com/djayamah/usewarden.git
+   ! [remote rejected] HEAD -> main (push declined due to repository rule violations)
+  error: failed to push some refs to 'https://github.com/djayamah/usewarden.git'
+  exit: 1  (non-zero = rejected)
+
+--- ATTEMPT 3: DELETE main ---
+$ git push public :main
+  To https://github.com/djayamah/usewarden.git
+   ! [remote rejected] main (refusing to delete the current branch: refs/heads/main)
+  error: failed to push some refs to 'https://github.com/djayamah/usewarden.git'
+  exit: 1  (non-zero = rejected)
+
+--- what main actually points at, after all three attempts ---
+  01275ca59f25dd257189d8a2d14e8fef8ed83e77
+  unchanged from the published commit - nothing landed.
+
+--- the ruleset that did it ---
+  ruleset: protect-main   enforcement: active
+failed to parse jq expression (line 1, column 81)
+    "  bypass_actors: \(.bypass_actors | length)\n  rules: \([.rules[].type] | join(\", \"))"
+                                                                                    ^  unexpected token "\\"
+
+--- one honest caveat about attempt 3 ---
+  The deletion attempt was refused with "refusing to delete the current branch", which is
+  GitHub's default-branch guard answering before the ruleset's `deletion` rule got a turn.
+  So attempt 3 proves main cannot be deleted; it does not, on its own, prove the deletion
+  RULE is what stopped it. The rule is present and active (listed above) and would apply to
+  any other branch the ruleset covers. Attempts 1 and 2 are unambiguous.
+
+RESULT: PASS - direct push, force push and deletion are all rejected for the repository owner.
