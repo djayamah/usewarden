@@ -85,3 +85,26 @@ objects considered: 124
 SCAN 2 EXIT: 0
 
 RESULT: CLEAN TWICE IN A ROW. The visibility change is unblocked.
+############################################################
+# FINAL SCAN - the PUBLISHED history at github.com/djayamah/usewarden
+# Run after the merge, against the remote-tracking ref, not a local branch.
+############################################################
+
+=== PRE-PUBLIC SCAN ===
+captured:  2026-08-19T17:26:06Z
+repo:      ~/warden
+scope:     public/main
+head:      b418bd609cd3bdc560c1d8b8dcdc834e12ba6927
+gitleaks:  8.30.1
+
+--- PASS 1: gitleaks, full history ---
+CLEAN    gitleaks: 0 findings across 3 commit(s)
+
+--- PASS 2: pattern scan, every blob in history ---
+         identity strings derived for this machine: 11 (not printed)
+         blobs scanned: 138 (of 184 objects)
+CLEAN    pattern scan: 0 findings
+
+objects considered: 187
+
+=== SCAN CLEAN - safe to publish this history ===

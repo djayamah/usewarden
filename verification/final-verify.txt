@@ -1,0 +1,91 @@
+=== USEWARDEN FULL VERIFICATION PASS ===
+captured: 2026-08-19T17:32:48Z
+commit:   7a30cf2db8776a8acc78d9e3d766e9eba5603edb
+branch:   main
+node:     v25.5.0   npm: 11.19.0
+
+--- clean build from scratch ---
+PASS  typescript build (strict, noUncheckedIndexedAccess)
+PASS  typecheck with no emit
+
+--- test suite, build machine ---
+  ℹ tests 247
+  ℹ suites 54
+  ℹ pass 247
+  ℹ fail 0
+PASS  full suite on v25.5.0
+      Layer-1 catch rate: 15/17 = 88.2%
+      missed (expected to be Layer-2 only): goal abandonment (L2), invariant violation (L2)
+
+--- test suite, LTS target (Node 22) ---
+  # tests 247
+  # pass 247
+  # fail 0
+PASS  full suite on v22.22.0 (Active LTS)
+
+--- pre-publish check (runs first: it requires a clean working tree) ---
+PASS  pre-publish check
+
+--- fixture is reproducible from the tracked seed ---
+PASS  scripts/make-fixture.sh regenerates the sabotage fixture
+PASS  usewarden re-registers in the regenerated fixture
+
+--- end-to-end gates ---
+PASS  clean-machine simulation (pack -> install -> protect -> demo -> uninstall -> restore)
+PASS  dashboard screenshots rendered by a real headless browser (synthetic home)
+
+--- CLI smoke, against the live fixture state ---
+PASS  usewarden --version
+PASS  usewarden status
+PASS  usewarden doctor
+PASS  usewarden policy
+PASS  usewarden demo
+PASS  usewarden incidents --json
+PASS  usewarden telemetry status
+PASS  usewarden statusline
+
+--- live evidence on record ---
+  live catches from real agent sessions: 20 (requirement: >= 3)
+  metered judge spend: $0.0000 of $15.00 limit
+  live session transcripts:
+    verification/live/01-env-read.txt
+    verification/live/02-sibling-write.txt
+    verification/live/03-force-push.txt
+    verification/live/04-invariant-drift.txt
+    verification/live/05-dependency-drift.txt
+    verification/live/06-gemini-env.txt
+    verification/live/07-regression-check.txt
+    verification/live/08-ab-removal.txt
+    verification/live/08b-unprotected-session.txt
+    verification/live/08c-reprotected-session.txt
+    verification/live/09-shell-injection.txt
+    verification/live/10-rm-rf-outside.txt
+
+--- documentation completeness ---
+PASS  README.md (384 lines)
+PASS  SECURITY.md (91 lines)
+PASS  LICENSE (21 lines)
+PASS  CONTRIBUTING.md (103 lines)
+PASS  DECISIONS.md (648 lines)
+PASS  .github/workflows/ci.yml (124 lines)
+PASS  .github/workflows/release.yml (85 lines)
+PASS  .github/pull_request_template.md (29 lines)
+PASS  .github/ISSUE_TEMPLATE/bug_report.yml (66 lines)
+PASS  .github/ISSUE_TEMPLATE/agent_support.yml (40 lines)
+PASS  assets/incident-card.png (257 lines)
+PASS  assets/dashboard.png (725 lines)
+PASS  docs/HOOK-MATRIX.md (250 lines)
+PASS  docs/THREAT-MODEL.md (67 lines)
+PASS  docs/DEPENDENCY-BUDGET.md (83 lines)
+PASS  docs/TELEMETRY.md (84 lines)
+PASS  ops/JUDGE-LIVE-CHECK.md (146 lines)
+PASS  CLAUDE.md (104 lines)
+PASS  PROGRESS.md (442 lines)
+PASS  launch/NAME-CANDIDATES.md (107 lines)
+PASS  launch/POSTS.md (310 lines)
+PASS  launch/PUBLISH-CHECKLIST.md (95 lines)
+PASS  launch/RULES-REGISTRY.md (67 lines)
+
+PASS  every threat-model row names a real proving test
+
+=== FULL VERIFICATION PASS: ALL GATES GREEN ===

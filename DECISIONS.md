@@ -633,3 +633,16 @@ Format: `[decision — rationale — confidence 1-10 — what would change it]`
   The suite also asserts the sabotage landed first — that the probe locations really are
   unusable — so a green result cannot come from a probe that was quietly fine. — confidence 9 —
   n/a.**
+
+- **[D-068] `verify-all.sh` intermittently reported `FAIL full suite on v22.22.0 (exit 0)` for a
+  run that had just passed 247/247, and the cause was in the gate, not the suite — rationale: the
+  check was `[ $RC -eq 0 ] && printf '%s' "$OUT" | grep -qE '^# fail 0$'` under `set -o pipefail`.
+  `grep -q` exits the instant it finds its match; the producer then takes SIGPIPE and exits 141;
+  pipefail promotes 141 to the pipeline's status, so the condition is FALSE even though the match
+  succeeded. With ~1,900 lines of TAP and the match on the second-to-last line it is a race, which
+  is why it passed on some runs and failed on others. Every such check now uses a here-string,
+  which has no pipeline and therefore no SIGPIPE. It appeared twice before being taken seriously,
+  and the first response — re-running until it went green — is precisely the habit a flaky gate
+  trains. A gate that intermittently fails a passing run is worse than no gate. Also fixed the
+  same pattern in `apply-hardening.sh` and `verify-hardening.sh`, where a plan-limit message could
+  have been missed the same way. — confidence 9 — n/a.**

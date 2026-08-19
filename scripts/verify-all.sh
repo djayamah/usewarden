@@ -41,7 +41,14 @@ echo
 echo "--- test suite, build machine ---"
 TEST_OUT="$(npm test 2>&1)"
 echo "$TEST_OUT" | grep -E '^(ℹ|# ) ?(tests|suites|pass|fail)' | sed 's/^/  /'
-if echo "$TEST_OUT" | grep -qE '^(ℹ|# ) ?fail 0$'; then
+# A HERE-STRING, not a pipe. Under `set -o pipefail`, `producer | grep -q PATTERN` reports the
+# pipeline as FAILED whenever grep finds its match and exits before the producer has finished
+# writing: the producer takes SIGPIPE, exits 141, and pipefail promotes that to the pipeline's
+# status. With ~1,900 lines of TAP and the match on the second-to-last line, that is a race - it
+# reported "FAIL full suite (exit 0)" for a suite that had just passed 247/247, twice. A gate that
+# intermittently fails a passing run is worse than no gate, because the first response is to
+# re-run it until it goes green.
+if grep -qE '^(ℹ|# ) ?fail 0$' <<<"$TEST_OUT"; then
   echo "PASS  full suite on $(node --version)"
 else
   echo "FAIL  full suite on $(node --version)"; FAILED=1
@@ -58,11 +65,11 @@ if [ -x "$N22" ]; then
   # Relying on the text alone once produced a spurious FAIL on a run whose summary said
   # `# fail 0`, which is the same "reported state disagrees with reality" trap this project
   # keeps finding elsewhere.
-  if [ $LTS_RC -eq 0 ] && printf '%s' "$LTS_OUT" | grep -qE '^# fail 0$'; then
+  if [ $LTS_RC -eq 0 ] && grep -qE '^# fail 0$' <<<"$LTS_OUT"; then
     echo "PASS  full suite on $("$N22" --version) (Active LTS)"
   else
     echo "FAIL  full suite on $("$N22" --version) (exit $LTS_RC)"
-    printf '%s' "$LTS_OUT" | grep -E "not ok|AssertionError" | head -10 | sed 's/^/        /'
+    grep -E "not ok|AssertionError" <<<"$LTS_OUT" | head -10 | sed 's/^/        /' || true
     FAILED=1
   fi
 else
