@@ -101,12 +101,67 @@ function findLocalCli(): LocalCli | null {
  * OpenAI/Gemini figures are ESTIMATES and are labelled as such in `usewarden status --json`;
  * usewarden always records the exact token counts, so a wrong price never corrupts the token ledger.
  */
-type MeteredProvider = 'anthropic' | 'openai' | 'gemini';
-const PROVIDERS: Record<MeteredProvider, { env: string; model: string; inPer1M: number; outPer1M: number }> = {
-  anthropic: { env: 'ANTHROPIC_API_KEY', model: 'claude-haiku-4-5', inPer1M: 1.00, outPer1M: 5.00 },
-  openai:    { env: 'OPENAI_API_KEY',    model: 'gpt-5-mini',       inPer1M: 0.25, outPer1M: 2.00 },
-  gemini:    { env: 'GEMINI_API_KEY',    model: 'gemini-2.5-flash', inPer1M: 0.30, outPer1M: 2.50 },
+export type MeteredProvider = 'anthropic' | 'openai' | 'gemini';
+
+export interface ProviderSpec {
+  env: string;
+  model: string;
+  inPer1M: number;
+  outPer1M: number;
+  /**
+   * The date these two prices were last checked against the vendor's published pricing page,
+   * ISO yyyy-mm-dd. It exists because a hard-coded price is a fact with a shelf life: the figures
+   * this file shipped with on 2026-08-19 were already wrong for two of the three providers, and
+   * nothing anywhere said so. `pricingStaleness()` turns that into a visible warning instead of a
+   * silently wrong dollar figure. Token counts are always recorded exactly and are never
+   * estimated, so a stale price can make the ledger's USD column wrong but can never corrupt the
+   * usage it is derived from.
+   */
+  pricedOn: string;
+  /** Where the figures came from, so the next person can re-check them in one click. */
+  pricingSource: string;
+}
+
+const PROVIDERS: Record<MeteredProvider, ProviderSpec> = {
+  anthropic: {
+    env: 'ANTHROPIC_API_KEY', model: 'claude-haiku-4-5',
+    inPer1M: 1.00, outPer1M: 5.00,
+    pricedOn: '2026-08-19', pricingSource: 'https://claude.com/pricing#api',
+  },
+  openai: {
+    env: 'OPENAI_API_KEY', model: 'gpt-5-mini',
+    inPer1M: 0.125, outPer1M: 1.00,
+    pricedOn: '2026-08-19', pricingSource: 'https://openai.com/api/pricing/',
+  },
+  gemini: {
+    env: 'GEMINI_API_KEY', model: 'gemini-3.7-flash',
+    inPer1M: 0.75, outPer1M: 3.75,
+    pricedOn: '2026-08-19', pricingSource: 'https://ai.google.dev/gemini-api/docs/pricing',
+  },
 };
+
+export function providerSpecs(): Record<MeteredProvider, ProviderSpec> { return PROVIDERS; }
+
+/** Days since a provider's prices were last checked. */
+export function pricingAgeDays(p: MeteredProvider, now = Date.now()): number {
+  const t = Date.parse(PROVIDERS[p].pricedOn + 'T00:00:00Z');
+  if (!Number.isFinite(t)) return Number.POSITIVE_INFINITY;
+  return Math.floor((now - t) / 86_400_000);
+}
+
+export const PRICING_STALE_AFTER_DAYS = 120;
+
+/**
+ * A warning string when a provider's prices are older than the staleness window, else null.
+ * Surfaced by `usewarden status`, so the dollar column never quietly drifts away from reality.
+ */
+export function pricingStaleness(p: MeteredProvider, now = Date.now()): string | null {
+  const age = pricingAgeDays(p, now);
+  if (age <= PRICING_STALE_AFTER_DAYS) return null;
+  return `JUDGE_PRICING_STALE: ${p} prices were last checked ${PRICES_DATE(p)} (${age} days ago). `
+    + `The USD figure is an ESTIMATE at those rates; token counts are exact. Re-check ${PROVIDERS[p].pricingSource}.`;
+}
+function PRICES_DATE(p: MeteredProvider): string { return PROVIDERS[p].pricedOn; }
 
 export function selectProvider(policy: Policy): ProviderConfig | null {
   for (const p of ['anthropic', 'openai', 'gemini'] as const) {
@@ -154,6 +209,37 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 const MAX_TRANSCRIPT_CHARS = 6000;
+
+/**
+ * Turn a non-2xx provider response into one short, actionable, SECRET-FREE message.
+ *
+ * Three requirements, in order of importance:
+ *  1. It must never echo the request. A provider that 400s often quotes back what it received,
+ *     and what it received includes the transcript window. `redact()` runs over the body and the
+ *     result is length-capped.
+ *  2. It must never contain the API key. The key is not in the body, but a provider is free to
+ *     put a key fingerprint in an error string, so the caller also asserts on this.
+ *  3. It must distinguish a MISCONFIGURATION (401/403 - the user set the wrong key, and no
+ *     amount of retrying fixes it) from a TRANSIENT failure (429, 5xx, timeout). Both fail open,
+ *     but only one of them is worth telling the user to go and fix.
+ */
+export async function describeHttpFailure(res: { status: number; text(): Promise<string> }): Promise<string> {
+  let detail = '';
+  try {
+    const body = (await res.text()).slice(0, 400);
+    const j = JSON.parse(body) as { error?: { type?: string; message?: string; status?: string; code?: string } };
+    const e = j.error ?? {};
+    detail = [e.type, e.status, e.code].filter(Boolean).join('/') || (e.message ?? '');
+  } catch { /* a non-JSON error body carries nothing worth quoting */ }
+  const kind = res.status === 401 || res.status === 403 ? 'AUTH'
+    : res.status === 429 ? 'RATE_LIMIT'
+    : res.status >= 500 ? 'PROVIDER_DOWN'
+    : 'REQUEST_REJECTED';
+  const advice = kind === 'AUTH'
+    ? ' The API key was rejected - check the key you exported. Retrying will not help.'
+    : '';
+  return `HTTP ${res.status} ${kind}${detail ? ` (${redact(detail).slice(0, 120)})` : ''}.${advice}`;
+}
 
 export async function maybeJudge(
   store: Store,
@@ -222,19 +308,25 @@ export async function maybeJudge(
   const cost = cfg.metered
     ? (raw.inTok / 1e6) * cfg.inPer1M + (raw.outTok / 1e6) * cfg.outPer1M
     : 0;
+  // The spend is recorded BEFORE the response is parsed, and deliberately so: a provider that
+  // returns 200 with unusable content has still been paid. Recording only on a parseable answer
+  // would make the ledger under-report exactly when things are going wrong.
   store.bump(`judge_calls:${e.sessionId}`);
   store.recordJudgeSpend(cfg.provider, cfg.model, raw.inTok, raw.outTok, cost, false);
 
+  const stale = cfg.metered ? pricingStaleness(cfg.provider as MeteredProvider) : null;
   const parsed = parseJudgeJson(raw.text);
   if (!parsed) {
     return {
       ran: true, mocked: false, costUsd: cost, provider: cfg.provider, model: cfg.model,
-      warning: 'JUDGE_UNPARSEABLE: the judge did not return the required JSON object. Treated as NO VERDICT, never as no-drift.',
+      warning: 'JUDGE_UNPARSEABLE: the judge did not return the required JSON object. Treated as NO VERDICT, never as no-drift.'
+        + (stale ? ' ' + stale : ''),
     };
   }
   return {
     ran: true, mocked: false, costUsd: cost, provider: cfg.provider, model: cfg.model,
     ...(parsed.drift ? { verdict: driftVerdict(parsed) } : {}),
+    ...(stale ? { warning: stale } : {}),
   };
 }
 
@@ -304,6 +396,17 @@ function recentActivity(e: NormalizedEvent): string {
   return redact(lines.join('\n')).slice(-MAX_TRANSCRIPT_CHARS);
 }
 
+/**
+ * Overridable so the contract tests can exercise the real abort path in milliseconds instead of
+ * twelve seconds, and so a user on a slow link can raise it. Clamped: a zero or negative timeout
+ * would mean "abort immediately", which is a judge that never runs while looking like one that
+ * does.
+ */
+export function judgeTimeoutMs(): number {
+  const raw = Number(process.env['USEWARDEN_JUDGE_TIMEOUT_MS'] ?? '');
+  if (Number.isFinite(raw) && raw >= 10 && raw <= 120_000) return raw;
+  return TIMEOUT_MS;
+}
 const TIMEOUT_MS = 12_000;
 const LOCAL_TIMEOUT_MS = 60_000;
 
@@ -331,13 +434,19 @@ function callLocalCli(cfg: ProviderConfig, system: string, user: string):
   return { text: out, inTok: 0, outTok: 0 };
 }
 
-async function callProvider(cfg: ProviderConfig, system: string, user: string):
+/**
+ * Exported for the provider contract suite (tests/judge-providers.test.ts), which drives every
+ * metered provider against its published request/response schema with a stubbed `fetch` and no
+ * API key. Layer 2 has only ever run for real through the local-CLI judge; without these tests
+ * the three metered adapters would be three untested code paths shipping in a security tool.
+ */
+export async function callProvider(cfg: ProviderConfig, system: string, user: string):
 Promise<{ text: string; inTok: number; outTok: number }> {
   if (cfg.provider === 'local-claude' || cfg.provider === 'local-gemini') {
     return callLocalCli(cfg, system, user);
   }
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => ac.abort(), judgeTimeoutMs());
   try {
     if (cfg.provider === 'anthropic') {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -355,7 +464,7 @@ Promise<{ text: string; inTok: number; outTok: number }> {
           messages: [{ role: 'user', content: user }],
         }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await describeHttpFailure(res));
       const j = await res.json() as {
         content?: { type: string; text?: string }[];
         usage?: { input_tokens?: number; output_tokens?: number };
@@ -375,7 +484,7 @@ Promise<{ text: string; inTok: number; outTok: number }> {
           messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
         }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(await describeHttpFailure(res));
       const j = await res.json() as {
         choices?: { message?: { content?: string } }[];
         usage?: { prompt_tokens?: number; completion_tokens?: number };
@@ -398,7 +507,7 @@ Promise<{ text: string; inTok: number; outTok: number }> {
         generationConfig: { maxOutputTokens: 200, responseMimeType: 'application/json' },
       }),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error(await describeHttpFailure(res));
     const j = await res.json() as {
       candidates?: { content?: { parts?: { text?: string }[] } }[];
       usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };

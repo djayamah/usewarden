@@ -8,6 +8,7 @@ import { planFor, USEWARDEN_TAG } from './install/entries.js';
 import { readJsonFile } from './install/jsonfile.js';
 import { findRepoRoot, loadPolicy, PolicyLoadError } from './policy/load.js';
 import { usewardenHome } from './paths.js';
+import { mkdirpSafe } from './util.js';
 
 /**
  * `usewarden status` - the loudest surface in the product.
@@ -67,7 +68,7 @@ function unlockFile(): string { return path.join(usewardenHome(), 'unlock'); }
 /** `usewarden unlock` grants a 15-minute window in which config edits do not raise TAMPERED. */
 export function unlock(minutes = 15): number {
   const until = Date.now() + minutes * 60_000;
-  fs.mkdirSync(usewardenHome(), { recursive: true, mode: 0o700 });
+  mkdirpSafe(usewardenHome());
   fs.writeFileSync(unlockFile(), String(until), { mode: 0o600 });
   return until;
 }

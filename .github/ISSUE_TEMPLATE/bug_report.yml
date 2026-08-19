@@ -1,0 +1,66 @@
+name: Bug report
+description: Something usewarden did, or did not do, that it should have
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **If this is a security issue, stop.** Do not file it here — use
+        [SECURITY.md](../../blob/main/SECURITY.md) and GitHub's private vulnerability reporting.
+
+        The most useful bug report for this project is one where usewarden reported
+        **PROTECTED** and then did not act. That is the failure mode the whole tool is built
+        around, so please say so explicitly if that is what happened.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+      placeholder: |
+        The agent ran `rm -rf ../other-repo` and usewarden allowed it. I expected a Layer 1 block
+        on scope.allowed_paths.
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Which of these is closest?
+      options:
+        - usewarden said PROTECTED but did not block something it should have
+        - usewarden blocked something it should NOT have (false positive)
+        - usewarden crashed, hung, or slowed an agent down
+        - the CLI, dashboard or status line is wrong or confusing
+        - documentation is wrong or missing
+        - something else
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `usewarden doctor --json` and `usewarden status --json`
+      description: |
+        Both redact paths and neither contains credentials. This pair answers most of what a
+        maintainer would otherwise have to ask for.
+      render: json
+    validations:
+      required: false
+  - type: input
+    id: versions
+    attributes:
+      label: usewarden version, Node version, OS
+      placeholder: "usewarden 0.1.0, Node 22.22.0, macOS 15.5"
+    validations:
+      required: true
+  - type: input
+    id: agents
+    attributes:
+      label: Which agent(s) were configured
+      placeholder: "Claude Code (project scope), Gemini CLI (user scope)"
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: A `usewarden.yaml`, a hook payload, or the sequence of commands. Redact anything private.
+    validations:
+      required: false

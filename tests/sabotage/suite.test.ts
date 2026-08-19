@@ -13,7 +13,7 @@ import { applyInit, extractUsewardenEntries, planInit, removeEntries, usewardenS
 import { readJsonFile, serialize } from '../../src/install/jsonfile.js';
 import { buildStatus } from '../../src/status.js';
 import { sandbox, gitInit, ev, run, type Sandbox } from '../helpers.js';
-import { sha256 } from '../../src/util.js';
+import { mkdirpSafe, sha256 } from '../../src/util.js';
 
 /**
  * THE SABOTAGE SUITE.
@@ -49,6 +49,12 @@ function policy() { return loadPolicy(sb.repo); }
 /** Runs the usewarden CLI as a real subprocess so exit codes and stream separation are real. */
 function cli(args: string[], cwd = sb.repo): { status: number; stdout: string; stderr: string } {
   const r = spawnSync(process.execPath, [CLI, ...args], {
+    // A hard deadline on every subprocess in this file. A usewarden that HANGS is worse than one
+    // that crashes - the hook sits in the agent's critical path - so a hang must show up as a
+    // failing test, not as a stalled CI job. That is not hypothetical: `usewarden hook` used to
+    // block forever on Linux when USEWARDEN_HOME sat on procfs, and it stalled three CI legs for
+    // fifteen minutes each before anything named it.
+    timeout: 30_000, killSignal: 'SIGKILL',
     cwd, encoding: 'utf8',
     env: { ...process.env, USEWARDEN_HOME: sb.usewardenHome, USEWARDEN_AGENT_HOME: sb.agentHome, NO_COLOR: '1' },
   });
@@ -602,5 +608,74 @@ describe('SAB-15 hook subprocess resilience', () => {
     });
     assert.equal(r.status, 1);
     assert.match(r.stderr, /unknown agent/);
+  });
+});
+
+// ===========================================================================
+describe('SAB-16 usewarden can never HANG the agent it is protecting', () => {
+  // The hook runs inside the agent's critical path. Failing open is the promise; blocking is the
+  // one failure mode that breaks that promise while looking like nothing at all. This was a real
+  // defect: `fs.mkdirSync(p, { recursive: true })` never returns when the target sits on procfs,
+  // so `USEWARDEN_HOME=/proc/anything` made the hook block forever on Linux. macOS has no /proc,
+  // so it passed locally and on the macOS CI leg, and hung all three Linux legs.
+  const PATHOLOGICAL: [string, string][] = [
+    ['a virtual filesystem (procfs)', '/proc/usewarden-should-refuse'],
+    ['a deep path under a virtual filesystem', '/proc/a/b/c/d'],
+    ['a path whose parent is a FILE, not a directory', ''],   // filled in below
+    ['a path under a directory that does not exist and cannot be made', '/dev/null/usewarden'],
+  ];
+
+  test('the sabotage lands: these really are unusable locations', () => {
+    // Without this, a test that "passes" might be passing because the location was fine.
+    assert.equal(fs.existsSync('/proc/usewarden-should-refuse'), false);
+    let created = true;
+    try { fs.mkdirSync('/dev/null/usewarden'); } catch { created = false; }
+    assert.equal(created, false, '/dev/null/usewarden was creatable - pick a different probe');
+  });
+
+  test('every pathological USEWARDEN_HOME still answers, and answers FAST', () => {
+    const fileParent = path.join(sb.root, 'a-file');
+    fs.writeFileSync(fileParent, 'not a directory');
+    PATHOLOGICAL[2] = ['a path whose parent is a FILE, not a directory', path.join(fileParent, 'home')];
+
+    for (const [label, home] of PATHOLOGICAL) {
+      const started = Date.now();
+      const r = spawnSync(process.execPath, [CLI, 'hook', 'claude', 'pre_tool'], {
+        input: JSON.stringify({
+          hook_event_name: 'PreToolUse', tool_name: 'Bash',
+          tool_input: { command: 'ls' }, cwd: sb.repo, session_id: 'hang-probe',
+        }),
+        encoding: 'utf8',
+        timeout: 15_000,
+        killSignal: 'SIGKILL',
+        env: { ...process.env, USEWARDEN_HOME: home, USEWARDEN_AGENT_HOME: sb.agentHome },
+      });
+      const elapsed = Date.now() - started;
+
+      assert.equal(r.signal, null, `${label}: the hook had to be KILLED - it hung the agent`);
+      assert.equal(r.status, 0, `${label}: a usewarden failure must never fail the agent`);
+      assert.ok(elapsed < 10_000, `${label}: the hook took ${elapsed}ms; it sits in the agent's critical path`);
+    }
+  });
+
+  test('mkdirpSafe refuses a virtual filesystem by name rather than by timing out', () => {
+    assert.throws(() => mkdirpSafe('/proc/usewarden-should-refuse'), /virtual filesystem/);
+    assert.throws(() => mkdirpSafe('/sys/usewarden-should-refuse'), /virtual filesystem/);
+  });
+
+  test('mkdirpSafe still creates ordinary nested directories, with the mode it was given', () => {
+    const deep = path.join(sb.root, 'x', 'y', 'z');
+    mkdirpSafe(deep);
+    assert.equal(fs.statSync(deep).isDirectory(), true);
+    if (process.platform !== 'win32') {
+      assert.equal(fs.statSync(deep).mode & 0o777, 0o700, 'the 0700 default is a privacy control, not a detail');
+    }
+    mkdirpSafe(deep);   // idempotent: an existing directory is success
+  });
+
+  test('mkdirpSafe refuses a path whose ancestor is a file, instead of half-creating', () => {
+    const f = path.join(sb.root, 'blocker');
+    fs.writeFileSync(f, 'x');
+    assert.throws(() => mkdirpSafe(path.join(f, 'child')), /not a directory/);
   });
 });

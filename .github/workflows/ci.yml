@@ -1,0 +1,124 @@
+name: CI
+
+# Runs on every pull request and on every push to main. Branch protection requires a pull
+# request, so in practice this is the only path code takes to main.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Read-only by default. Nothing in CI needs to write to the repository, and a workflow that can
+# is a workflow that can be turned into a persistence mechanism.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    # A stalled job is a job that names nothing and bills for an hour. npm test also carries a
+    # per-test timeout, so a hang produces the name of the test that hung rather than a stall.
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22 and 24 are the Active LTS lines; 25 is Current. usewarden requires >= 22.13.0
+        # because that is where `node:sqlite` stopped needing a flag, so 22 is the real floor
+        # and it is tested on every change rather than assumed.
+        node: ['22', '24', '25']
+        os: [ubuntu-latest]
+        include:
+          # One macOS leg on the LTS floor: this is a tool that writes into ~/.config-shaped
+          # paths and spawns processes, and those are exactly the things that differ per OS.
+          - node: '22'
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # `npm ci --ignore-scripts` on purpose. usewarden has no runtime dependencies and no install
+      # scripts of its own (docs/THREAT-MODEL.md T-01, the ChainDrop mechanism); running CI with
+      # scripts disabled means a transitive dev-dependency that grows one cannot execute here
+      # either, and the assertion below proves none has appeared.
+      - name: Install (no install scripts)
+        run: npm ci --ignore-scripts
+
+      - name: Report the versions actually under test
+        run: |
+          node --version
+          npm --version
+
+      - name: Typecheck (strict, noUncheckedIndexedAccess)
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      # If the suite ever stalls rather than fails, this prints what is still alive at the end.
+      # Cheap, and the first CI run of this workflow is exactly why it is here.
+      - name: Report stray listeners and child processes
+        if: always()
+        run: |
+          echo "--- node processes still running ---"
+          ps -eo pid,etime,command 2>/dev/null | grep -i "[n]ode" || echo "none"
+          echo "--- listening sockets ---"
+          (ss -ltnp 2>/dev/null || netstat -an 2>/dev/null | head -20) || echo "unavailable"
+
+      # Belt and braces around the packaging tests: a fast, greppable assertion that survives
+      # even if the suite is ever skipped.
+      - name: Assert no install scripts anywhere
+        run: |
+          node -e '
+            const p = require("./package.json");
+            const bad = ["preinstall","install","postinstall","prepare","prepublish"]
+              .filter(k => (p.scripts || {})[k]);
+            if (bad.length) { console.error("install scripts present:", bad.join(", ")); process.exit(1); }
+            if (Object.keys(p.dependencies || {}).length) {
+              console.error("runtime dependencies present:", Object.keys(p.dependencies).join(", "));
+              process.exit(1);
+            }
+            console.log("no install scripts, no runtime dependencies");
+          '
+
+      - name: Assert the packed tarball contains no source, tests, or fixtures
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          node -e '
+            const files = JSON.parse(require("fs").readFileSync("/tmp/pack.json","utf8"))[0].files.map(f => f.path);
+            const leaked = files.filter(f =>
+              f.startsWith("src/") || f.startsWith("tests/") || f.startsWith("fixtures/") ||
+              f.startsWith("verification/") || f.endsWith(".env") || f === ".npmrc");
+            if (leaked.length) { console.error("tarball leaks:", leaked.join(", ")); process.exit(1); }
+            console.log(files.length + " files in the tarball, none of them source or fixtures");
+          '
+
+  scan:
+    name: Secret and identity pattern scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # the scan reads every blob in history, not the working tree
+
+      # Pattern pass only. It needs nothing but python3, which is why it can run here.
+      #
+      # The gitleaks half deliberately does NOT run in CI: pulling a third-party scanner binary
+      # into a workflow is exactly the supply-chain surface this repository pins action SHAs to
+      # avoid. gitleaks runs locally, in the pre-push gate, where a human sees the output —
+      # `./scripts/pre-public-scan.sh`. A run with it skipped prints "NOT the publication gate"
+      # on its last line and this job does not pretend otherwise.
+      - name: Pattern scan over every blob in history
+        env:
+          SCAN_SKIP_GITLEAKS: '1'
+        run: ./scripts/pre-public-scan.sh

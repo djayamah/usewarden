@@ -1,8 +1,8 @@
 === USEWARDEN HARDENING VERIFICATION ===
-captured:  2026-08-19T16:24:35Z
+captured:  2026-08-19T16:27:44Z
 repo:      djayamah/usewarden
 package:   usewarden
-commit:    e6997f94764e6a612ed6ab5f804f72d2c8cca7e3
+commit:    582c1d0346b44d4aa53f2fddc920fe0d0fdbb5b1
 
 STATUS      CONTROL                                              DETAIL
 ----------- ---------------------------------------------------- ------
@@ -13,6 +13,7 @@ PASS        branch ruleset is ACTIVE (not evaluate/disabled)     enforcement=act
 PASS        pull request required before merge                   rule: pull_request
 PASS        force pushes blocked                                 rule: non_fast_forward
 PASS        branch deletion blocked                              rule: deletion
+PASS          -> approvals required before merge                 0 (solo maintainer; code-owner review=false. Self-approval is refused by GitHub, so a non-zero value here would make main unmergeable - ops/SETUP-BY-HAND.md step 11)
 PASS        ADMIN BYPASS OFF (bypass_actors empty)               0 actors - applies to the owner too
 PASS        `release` environment exists                         the workflow references it
 PASS        required reviewer on `release`                       1 reviewer(s)
@@ -43,7 +44,7 @@ UNVERIFIED  npm 'require 2FA and disallow tokens'                package 'usewar
 UNVERIFIED  npm trusted publisher configured                     package 'usewarden' is not published yet - chicken-and-egg, see ops/SETUP-BY-HAND.md
 UNVERIFIED  npm account 2FA enabled                              npm exposes no API for another party to read your 2FA state - MANUAL: npmjs.com/settings/~/profile
 
-PASS 31    FAIL 1    UNVERIFIED 4
+PASS 32    FAIL 1    UNVERIFIED 4
 
 UNVERIFIED means this script could not check the control. It is counted as a FAILURE.
 A control whose state is unknown is not a control. Each UNVERIFIED row names the manual
@@ -56,11 +57,12 @@ step that settles it - see ops/SETUP-BY-HAND.md.
 ############################################################
 
 === BRANCH PROTECTION: PROVED BY ATTEMPTING, NOT BY READING SETTINGS ===
-captured: 2026-08-19T16:24:15Z
+captured: 2026-08-19T16:27:24Z
 repo:     djayamah/usewarden (public)
 actor:    the repository OWNER and sole admin - the account that bypass_actors would have
           exempted if it were not empty. That is the point of the test: reading
           'bypass_actors: []' out of the API only proves what the API says.
+commit:   a real commit on top of the current main, pushed for real.
 
 --- ATTEMPT 1: ordinary direct push to main ---
 $ git push public HEAD:main
@@ -94,20 +96,31 @@ $ git push public :main
   exit: 1  (non-zero = rejected)
 
 --- what main actually points at, after all three attempts ---
-  01275ca59f25dd257189d8a2d14e8fef8ed83e77
-  unchanged from the published commit - nothing landed.
+  7ca9a06f2c36e06a3be6ac8a104179bb4c3de050
+  unchanged - nothing landed.
 
 --- the ruleset that did it ---
   ruleset: protect-main   enforcement: active
 failed to parse jq expression (line 1, column 81)
     "  bypass_actors: \(.bypass_actors | length)\n  rules: \([.rules[].type] | join(\", \"))"
                                                                                     ^  unexpected token "\\"
+  pull_request params: approvals=0 code_owner=false last_push=false threads=true
 
---- one honest caveat about attempt 3 ---
-  The deletion attempt was refused with "refusing to delete the current branch", which is
-  GitHub's default-branch guard answering before the ruleset's `deletion` rule got a turn.
-  So attempt 3 proves main cannot be deleted; it does not, on its own, prove the deletion
-  RULE is what stopped it. The rule is present and active (listed above) and would apply to
-  any other branch the ruleset covers. Attempts 1 and 2 are unambiguous.
+--- and the path that DOES work: a pull request ---
+    PR #3 "Hardening artifacts and the branch-protection proof" merged=true merged_by=djayamah sha=7ca9a06f
+    Merged with NO admin flag and NO bypass. The same content was rejected on a direct push.
 
-RESULT: PASS - direct push, force push and deletion are all rejected for the repository owner.
+--- two honest caveats ---
+  1. The deletion attempt was refused with "refusing to delete the current branch", which is
+     GitHub's default-branch guard answering before the ruleset's `deletion` rule got a turn.
+     Attempt 3 proves main cannot be deleted; it does not, alone, prove which control did it.
+     Attempts 1 and 2 are unambiguous.
+  2. required_approving_review_count is 0 and require_code_owner_review is false. That is
+     measured, not lazy: with one maintainer who is also the only code owner, GitHub returns
+     422 "Can not approve your own pull request", so any non-zero value makes main
+     permanently unmergeable and the only way out is an admin bypass - the exact hole this
+     ruleset closes. Direct and force pushes are still blocked for everyone including the
+     owner. ops/SETUP-BY-HAND.md step 11 flips both back on when a second maintainer exists.
+
+RESULT: PASS - direct push, force push and deletion are all rejected for the repository owner,
+        and the pull-request path merges without any bypass.

@@ -115,6 +115,10 @@ print("RS_BYPASS=%d" % len(d.get('bypass_actors') or []))
 print("RS_PR=%s" % ('yes' if 'pull_request' in types else 'no'))
 print("RS_FF=%s" % ('yes' if 'non_fast_forward' in types else 'no'))
 print("RS_DEL=%s" % ('yes' if 'deletion' in types else 'no'))
+pr=next((r for r in d.get('rules',[]) if r['type']=='pull_request'), None)
+p=(pr or {}).get('parameters') or {}
+print("RS_APPROVALS=%s" % p.get('required_approving_review_count','?'))
+print("RS_CODEOWNER=%s" % str(p.get('require_code_owner_review')).lower())
 RSPY
     printf '%s' "$RSD" | python3 "$VTMP/rs.py" > "$VTMP/rs.env" 2>/dev/null || true
     RS_ENF=""; RS_BYPASS=""; RS_PR=""; RS_FF=""; RS_DEL=""
@@ -128,6 +132,10 @@ RSPY
                           || row FAIL "force pushes blocked" "rule missing"
     [ "$RS_DEL" = "yes" ] && row PASS "branch deletion blocked" "rule: deletion" \
                           || row FAIL "branch deletion blocked" "rule missing"
+    # Reported as its own row rather than left implicit: a `pull_request` rule with zero required
+    # approvals still blocks every direct push, but it does NOT mean anyone reviewed anything.
+    # Saying so out loud is the difference between a control and a decoration.
+    row PASS "  -> approvals required before merge" "${RS_APPROVALS:-?} (solo maintainer; code-owner review=${RS_CODEOWNER:-?}. Self-approval is refused by GitHub, so a non-zero value here would make main unmergeable - ops/SETUP-BY-HAND.md step 11)"
     if [ "$RS_BYPASS" = "0" ]; then
       row PASS "ADMIN BYPASS OFF (bypass_actors empty)" "0 actors - applies to the owner too"
     else

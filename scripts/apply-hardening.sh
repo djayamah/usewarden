@@ -51,8 +51,8 @@ cat > "$TMP/ruleset.json" <<JSON
       "parameters": {
         "required_approving_review_count": 0,
         "dismiss_stale_reviews_on_push": true,
-        "require_code_owner_review": true,
-        "require_last_push_approval": true,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
         "required_review_thread_resolution": true,
         "allowed_merge_methods": ["squash", "merge", "rebase"]
       } },
@@ -61,6 +61,20 @@ cat > "$TMP/ruleset.json" <<JSON
   ]
 }
 JSON
+# require_code_owner_review and require_last_push_approval are FALSE while there is one
+# maintainer, and the reason is the same one as D-040: with a single code owner who is also the
+# only author, GitHub refuses "Can not approve your own pull request", so the gate becomes a lock
+# with no key. Measured, not assumed - the first pull request opened against this ruleset was
+# BLOCKED, and the self-approval attempt returned 422. The escape from that is either an admin
+# bypass merge, which is the exact hole this ruleset exists to close, or an honest setting.
+#
+# What still holds with them false: `pull_request` means main CANNOT be pushed to directly, by
+# anyone including the owner; `non_fast_forward` blocks force pushes; `deletion` blocks deletion;
+# `bypass_actors` is empty so none of it is skippable. What is given up: nothing today, because a
+# solo maintainer's code-owner approval was never obtainable. ops/SETUP-BY-HAND.md step 11 says
+# to set BOTH back to true, together with the environment's prevent_self_review, on the day a
+# second maintainer exists.
+#
 # bypass_actors is EMPTY on purpose. That is the control that breaks the ChainDrop chain, in
 # which the operators pushed straight to main. It must apply to the repository owner too.
 # A failed `gh api --jq` still prints the error body to stdout, so the exit status has to be

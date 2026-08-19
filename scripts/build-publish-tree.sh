@@ -23,6 +23,10 @@
 #   ops/SETUP-*.md     - the founder's account-configuration runbooks
 #   .claude/           - this machine's session hooks and current-phase notes
 #   scripts/progress-snapshot.sh, verification/precompact-hook*  - build-harness only
+#
+# NOTE the public repo has NO CLAUDE.md. The operator's CLAUDE.md is a fence and only works if it
+# names the real private paths, so it is excluded rather than redacted; CONTRIBUTING.md carries
+# the parts a contributor needs.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$ROOT"
@@ -57,7 +61,19 @@ artifacts under verification/, both of which are checked by
 scripts/pre-public-scan.sh before every push.
 COMMITMSG
 
-COMMIT="$(git commit-tree "$TREE" -F "$MSG")"
+# PARENT: the commit currently published on the public remote, so the published history is a
+# normal linear history that GitHub can diff and open pull requests against. The first build has
+# no parent - that is the single orphan commit the note above describes. Building every update as
+# a fresh orphan (which the first version did) produces branches with "no history in common with
+# main", which GitHub refuses to open a PR for.
+git fetch -q "${PUBLISH_REMOTE:-public}" main 2>/dev/null || true
+PARENT="$(git rev-parse --verify --quiet "refs/remotes/${PUBLISH_REMOTE:-public}/main" || true)"
+if [ -n "${PUBLISH_MSG:-}" ]; then printf '%s\n' "$PUBLISH_MSG" > "$MSG"; fi
+if [ -n "$PARENT" ]; then
+  COMMIT="$(git commit-tree "$TREE" -p "$PARENT" -F "$MSG")"
+else
+  COMMIT="$(git commit-tree "$TREE" -F "$MSG")"
+fi
 git update-ref "refs/heads/$BRANCH" "$COMMIT"
 
 echo "=== PUBLICATION TREE BUILT ==="

@@ -21,6 +21,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$ROOT"
 SCAN_REF="${SCAN_REF:-}"
 FINDINGS=0
+PARTIAL=0
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 # This script's OWN OUTPUT is published (verification/pre-public-scan.txt). Printing $ROOT would
@@ -41,7 +42,14 @@ echo
 # PASS 1 - gitleaks over the commit graph
 # ---------------------------------------------------------------------------
 echo "--- PASS 1: gitleaks, full history ---"
-if ! command -v gitleaks >/dev/null 2>&1; then
+if [ "${SCAN_SKIP_GITLEAKS:-}" = "1" ]; then
+  # CI runs pass 2 on every pull request because it needs nothing but python3. Pass 1 needs a
+  # third-party binary, and pulling one into a workflow is the supply-chain surface this project
+  # pins SHAs to avoid - so gitleaks runs locally, in the pre-push gate, where a human can see it.
+  # A run with pass 1 skipped is NOT the publication gate and says so on its last line.
+  echo "SKIPPED  gitleaks (SCAN_SKIP_GITLEAKS=1) - this run is the PATTERN PASS ONLY"
+  PARTIAL=1
+elif ! command -v gitleaks >/dev/null 2>&1; then
   echo "BLOCKER  gitleaks is not installed - pass 1 could not run, so nothing is proven"
   FINDINGS=$((FINDINGS+1))
 else
@@ -217,6 +225,11 @@ P2=$?
 echo
 echo "objects considered: $NOBJ"
 echo
+if [ $FINDINGS -eq 0 ] && [ "$PARTIAL" = "1" ]; then
+  echo "=== PATTERN PASS CLEAN - but gitleaks did NOT run. This is NOT the publication gate. ==="
+  echo "    Run ./scripts/pre-public-scan.sh with gitleaks installed before any visibility change."
+  exit 0
+fi
 if [ $FINDINGS -eq 0 ]; then
   echo "=== SCAN CLEAN - safe to publish this history ==="
   exit 0
