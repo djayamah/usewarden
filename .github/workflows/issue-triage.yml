@@ -1,0 +1,61 @@
+name: Issue triage
+
+# Runs on the repository's own scoped GITHUB_TOKEN, never a personal credential.
+#
+# KILL SWITCH — either of these halts it, and either alone is sufficient:
+#   1. commit a file at .github/TRIAGE_BOT_DISABLED
+#   2. set the repository variable TRIAGE_BOT_ENABLED to anything other than "true"
+#
+# The variable is also the ON switch: the bot does nothing until someone sets it deliberately, so
+# merging this workflow does not start it.
+
+on:
+  issues:
+    types: [opened]
+
+# Least privilege, per GitHub's own guidance. `issues: write` is the minimum that can comment and
+# label; nothing here can push, read secrets beyond what is passed, or touch a pull request.
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-triage-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    # Cheap pre-checks before a runner does any work. The real kill-switch checks are in the bot
+    # itself, because a condition here that silently evaluates false is indistinguishable from a
+    # bot that ran and decided to say nothing.
+    if: github.event.issue.pull_request == null
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '22.13'
+
+      - name: Install and build
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+
+      - name: Triage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          TRIAGE_BOT_ENABLED: ${{ vars.TRIAGE_BOT_ENABLED }}
+          # Optional. Absent by default, in which case the bot is entirely deterministic and free.
+          USEWARDEN_BOT_GEMINI_KEY: ${{ secrets.USEWARDEN_BOT_GEMINI_KEY }}
+          USEWARDEN_BOT_OPENAI_KEY: ${{ secrets.USEWARDEN_BOT_OPENAI_KEY }}
+          USEWARDEN_BOT_ANTHROPIC_KEY: ${{ secrets.USEWARDEN_BOT_ANTHROPIC_KEY }}
+        run: node dist/bots/triage/src/main.js

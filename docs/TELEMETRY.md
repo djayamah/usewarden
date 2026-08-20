@@ -10,9 +10,11 @@ on writes a line to a local JSONL file under `~/.usewarden/telemetry/` and nothi
 ## Switching it on and off
 
 ```bash
-usewarden telemetry status   # what is the setting, and what exactly would be sent
-usewarden telemetry on       # opt in - prints the full payload so you can read it first
-usewarden telemetry off      # opt out
+usewarden telemetry status        # the setting, why it is off, and exactly what would be sent
+usewarden telemetry on            # opt in - shows the payload, then asks
+usewarden telemetry on --yes      # opt in without the prompt (scripts, CI)
+usewarden telemetry off           # opt out
+usewarden telemetry off --purge   # opt out AND delete every payload recorded locally
 ```
 
 Two environment variables force it off regardless of the setting, and both are honoured:
@@ -21,6 +23,44 @@ Two environment variables force it off regardless of the setting, and both are h
 |---|---|
 | `DO_NOT_TRACK=1` | telemetry off, overriding an explicit opt-in |
 | `USEWARDEN_TELEMETRY=0` | telemetry off, overriding an explicit opt-in |
+
+## Consent is a receipt, not a flag
+
+Off-by-default is necessary and not sufficient. The failure it does not cover is **consent
+drift**: you agree to send five counters, a later version quietly adds a sixth, and your
+original yes covers something you never read.
+
+So the switch is not a boolean. Opting in writes a receipt to
+`~/.usewarden/telemetry/consent.json`:
+
+```jsonc
+{
+  "granted_at": 1755662000000,
+  "schema_version": 1,
+  "usewarden_version": "0.1.0",
+  "fields": ["v", "usewarden", "platform", "node", "agents", "counts", "rules", "checklist"],
+  "digest": "<sha256 binding the field list to the schema version>"
+}
+```
+
+Three properties follow, each with a test:
+
+1. **The setting alone grants nothing.** `UPDATE meta SET value='on'` in the database does not
+   opt you in; without a valid receipt telemetry stays off and says why. (SAB-23.)
+2. **A schema bump revokes every existing receipt.** If the payload ever gains a field, every
+   prior consent lapses and telemetry goes off until you read the new payload and say yes again.
+   Consent expires by construction rather than by good intentions.
+3. **The receipt cannot be widened.** The digest binds the field list to the schema version, so
+   editing `fields` to cover more than was agreed invalidates the receipt rather than extending
+   it.
+
+`usewarden telemetry status` tells you which of these is why telemetry is off — "you never opted
+in" and "your consent lapsed at a schema change" are different sentences and you are owed the
+right one.
+
+Opting in is also two-step: the exact payload, built from your machine's real numbers, is printed
+**before** anything is recorded. In a non-interactive context — a pipe, a script, `--json` —
+usewarden refuses to opt you in without an explicit `--yes` rather than assuming.
 
 ## The exact payload schema
 
@@ -35,7 +75,7 @@ describe.
   "platform": "darwin",      // process.platform ONLY - no OS release, no arch, no hostname
   "node": "22",              // MAJOR version only
   "agents": ["claude"],      // which agent ids are registered. ids only, never config paths
-  "counts": {
+  "counts": {                // REAL agent sessions only - see below
     "events_seen": 1420,     // whole numbers
     "actions_blocked": 6,
     "drift_caught": 3,
@@ -49,6 +89,17 @@ describe.
   "checklist": ["agents_detected", "policy_created"]  // coarse install-funnel state
 }
 ```
+
+## The counts are real-session counts
+
+Every figure in `counts` is derived from incidents whose origin is `live` — a real agent session
+through the hook path. A `usewarden demo` run, a test fixture, or a replayed duplicate hook
+delivery cannot move any of them. That is the same anti-inflation rule the dashboard follows,
+applied to the wire, and it is asserted by a test that stores a demo incident and then requires
+the payload to ignore it. Full method: `docs/METRICS.md`.
+
+`rules` is likewise built from live incidents only, and is capped at 40 distinct keys so the map
+cannot become a channel for volume.
 
 ## What is never in it
 
@@ -78,7 +129,10 @@ Asserted by `tests/packaging.test.ts` under "T-15: telemetry", and mapped in
 ## Inspecting what usewarden has recorded
 
 ```bash
-cat ~/.usewarden/telemetry/local.jsonl
+cat ~/.usewarden/telemetry/local.jsonl   # every payload usewarden has built
+cat ~/.usewarden/telemetry/consent.json  # what you agreed to, and when
 ```
 
-Deleting that file is safe and usewarden will not recreate it unless telemetry is on.
+Deleting either file is safe. Deleting `local.jsonl` throws away the recorded payloads and
+usewarden will not recreate it unless telemetry is on; deleting `consent.json` revokes your
+consent, which turns telemetry off. `usewarden telemetry off --purge` does both.
