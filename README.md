@@ -1,29 +1,119 @@
 # usewarden
 
-**A firewall for your AI coding agents.** Install once, and usewarden watches every agent on your
-machine — Claude Code, Cursor, Gemini CLI, Copilot CLI, Codex, OpenCode — for drift, blocks
-out-of-scope actions, and shows you what it caught.
+**Stop your AI coding agent before it touches something it shouldn't.**
+
+One local guardrail for Claude Code, Cursor, Gemini CLI, Copilot CLI, Codex and OpenCode. It
+blocks writes outside the repo you're in, `.env` reads, `rm -rf` above the project root, force
+pushes to `main`, and `curl | sh` — deterministically, in under a millisecond, with **no API key
+and no tokens**.
 
 ![Two incident cards from a real agent session: a Layer 1 block of `rm -rf` outside the repo, and the Layer 2 drift judge flagging the same action](assets/incident-card.png)
 
-Both cards are real output from a real `claude --dangerously-skip-permissions` session. Layer 1
-blocked the command deterministically in under a millisecond; Layer 2 independently agreed it was
-off-goal. The agent read the reason, stopped, and explained itself instead of routing around the
-block. *(Absolute paths in the image are rewritten to a synthetic project — see
-[How the screenshots are made](#how-the-screenshots-are-made).)*
+*Real output from a real `claude --dangerously-skip-permissions` session. The agent read the
+reason, stopped, and explained itself instead of routing around the block.*
+
+## Is this your week?
+
+- **"It deleted files I never asked it to touch."** `rm -rf ~/` and its cousins are now a
+  recurring, publicly documented failure across agents — see anthropics/claude-code
+  [#10077](https://github.com/anthropics/claude-code/issues/10077),
+  [#29082](https://github.com/anthropics/claude-code/issues/29082),
+  [#30700](https://github.com/anthropics/claude-code/issues/30700),
+  [#37331](https://github.com/anthropics/claude-code/issues/37331). The common thread is not a bug
+  in any one agent: it is that agents run on your host with your permissions.
+- **"It edited the wrong repo."** The single most common real drift in this project's own live
+  sessions was an agent writing into a *sibling* checkout sitting beside the one it was told to
+  work in.
+- **"It ignored CLAUDE.md / .cursorrules."** Instructions in a file are advisory. A hook is not.
+- **"Context rot"** — forty messages in, it contradicts a decision you made together, reintroduces
+  a bug you already fixed, and edits a file it no longer remembers reading. usewarden warns at a
+  context threshold and can compare what the agent is *doing* against the goal you *declared*.
+
+usewarden does not make your machine safe — it is not a sandbox, and [it says so](#what-usewarden-cannot-catch).
+It raises the cost of the bad action and leaves a record you can look at.
+
+## Quickstart
 
 ```bash
 git clone https://github.com/djayamah/usewarden && cd usewarden
 npm install && npm run build
 node dist/src/cli.js init      # detects your agents, shows you a diff, registers hooks
 node dist/src/cli.js demo      # see a real incident card in 5 seconds
+node dist/src/cli.js status    # is it actually protecting you right now?
 ```
 
+Node ≥ 22.13. Zero runtime dependencies. No install scripts. MIT.
+
 > **Not on npm yet.** `usewarden` is unclaimed on the registry and this repository has never
-> published to it. When it does, the line above becomes `npx usewarden init` — and it will be
-> published through OIDC trusted publishing with no npm token in existence, which is the whole
-> point of [the release hardening](#security-posture). Until then, from source is the only way,
-> and saying otherwise would be the first thing this tool tells you not to trust.
+> published to it. When it does, the line above becomes `npx usewarden init` — published through
+> OIDC trusted publishing with no npm token in existence, which is the whole point of
+> [the release hardening](#security-posture). Until then, from source is the only way, and saying
+> otherwise would be the first thing this tool tells you not to trust.
+
+## FAQ
+
+**Does this send my code anywhere?**
+No. Layer 1 is entirely local and never leaves your machine. Telemetry is off by default and this
+version ships **no endpoint at all** — there is nowhere for a payload to go even if it were built
+([docs/TELEMETRY.md](docs/TELEMETRY.md)). The only thing that can ever leave is an optional Layer 2
+judge call, which you switch on yourself, to a provider you choose, with your own key. Its input is
+redacted and length-capped first.
+
+**Do I need an API key?**
+No. **Layer 1 — the blocking — needs no key and costs nothing.** It is deterministic pattern and
+scope matching: zero tokens, every event, and it catches 15 of the 17 scenarios in the project's
+own sabotage suite on its own. Layer 2, the semantic drift judge, is optional and **you bring your
+own key**; it will also use an already-authenticated `claude` or `gemini` CLI on your PATH, which
+costs no extra money. With nothing configured at all, Layer 2 announces itself as off and Layer 1
+runs unchanged — verified, not assumed.
+
+**Which agents does it support?**
+Claude Code and Gemini CLI are verified against live sessions on the build machine. Cursor,
+Copilot CLI and Codex CLI are built to each vendor's documented hook contract and covered by
+contract tests, but have not been watched firing — they are labelled UNVERIFIED-LOCALLY and you
+should treat them that way. OpenCode is a best-effort plugin shim. The full per-agent status,
+including what each vendor's hook system can and cannot do, is in
+[docs/HOOK-MATRIX.md](docs/HOOK-MATRIX.md).
+
+**What does it cost to run?**
+Nothing, unless you turn on the Layer 2 judge with a metered key. When you do, usewarden picks the
+cheapest provider you have a key for and shows you the per-call cost —
+[see below](#which-judge-usewarden-picks).
+
+**Why not just use my agent's own permissions and allowlists?**
+You should — usewarden does not replace them, and if you are only running one agent they may be
+all you need. usewarden adds three things an allowlist cannot: **one policy across six agents**
+instead of six separate configs, a **record** of what was attempted so you can look at it later,
+and a semantic layer that catches **drift away from the goal you stated**, which is not something
+a path allowlist can express. It also tells you loudly when it is not actually running, which is
+[the failure mode](#why-this-exists) this whole project is built around.
+
+**How do I uninstall it, and will my agent config survive?**
+`usewarden uninstall` removes usewarden's hook entries from every agent config it registered with.
+Every write was preceded by a timestamped backup under `~/.usewarden/backups/`, and
+`usewarden restore-configs` restores from one **byte-identically** — verified by sha256 on a
+simulated clean machine, including the case where usewarden created a config file that did not
+previously exist (it deletes it again).
+
+**Isn't this just a wrapper around hooks?**
+Yes, at the bottom. Every agent vendor ships a hook system and usewarden registers with each of
+them. The value is not the hooks — it is one policy across six agents instead of six, a record of
+what happened that you can look at later, a semantic layer that catches drift an allowlist cannot
+express, and, most of all, **knowing the hooks actually fired**. That last part is what
+[the seven defects](#why-this-exists) are about: five of them were a guardrail reporting that it
+was running while it was not. The per-vendor differences, and what each vendor's hook system can
+and cannot do, are in [docs/HOOK-MATRIX.md](docs/HOOK-MATRIX.md).
+
+**What version of Node do I need?**
+**Node 22.13 or newer.** That is where `node:sqlite` stopped requiring a flag, which is what
+usewarden uses instead of a native addon — see
+[docs/DEPENDENCY-BUDGET.md](docs/DEPENDENCY-BUDGET.md). Node 22 (*Jod*) and 24 (*Krypton*) are the
+Active LTS lines; 18 and 20 are end-of-life and unsupported.
+
+**Will it get in my way?**
+It has an escape hatch for every control it applies, and the reason lines are written for the
+agent to self-correct from. If it ever reports a state it cannot verify, it says so loudly rather
+than guessing.
 
 ---
 
@@ -94,7 +184,7 @@ non-zero for the last two, so it works in a shell prompt or a CI step.
 ## What it actually does
 
 **Layer 1 — deterministic, zero tokens, every single event.** Scope globs, command patterns,
-protected branches, sibling-repo detection, context-fill threshold. Measured to catch **88.2%**
+protected branches, sibling-repo detection, context-fill threshold. Measured to catch **15 of 17**
 of usewarden's own sabotage suite on its own, with no model involved.
 
 **Layer 2 — a sampled LLM drift judge.** Compares what the agent is doing against the goal you
@@ -106,16 +196,27 @@ and **Layer 2 being down can never disable Layer 1**.
 
 ### Layer 2 providers — verification status
 
-Usewarden picks the first available: `ANTHROPIC_API_KEY`, then `OPENAI_API_KEY`, then
-`GEMINI_API_KEY`, then an authenticated `claude` or `gemini` CLI already on your PATH.
+Usewarden picks the **cheapest** provider you have a key for, then falls back to an
+authenticated `claude` or `gemini` CLI already on your PATH. See
+[Which judge usewarden picks](#which-judge-usewarden-picks) below.
 
 | Provider | Model | Contract-tested | Proved against the live API |
 |---|---|---|---|
 | Local `claude` CLI | your existing subscription | yes | **yes** — 12 real sessions, 2 live drift catches (`verification/live/`) |
 | Local `gemini` CLI | your existing subscription | yes | partial — registration and hook execution proved live; no model-driven call (no key on the build machine) |
-| Anthropic API | `claude-haiku-4-5` | yes — 40 tests | **UNVERIFIED-LIVE** |
-| OpenAI API | `gpt-5-mini` | yes — 40 tests | **UNVERIFIED-LIVE** |
-| Gemini API | `gemini-3.7-flash` | yes — 40 tests | **UNVERIFIED-LIVE** |
+| Anthropic API | `claude-haiku-4-5` | yes — 40 tests | **UNVERIFIED-LIVE** — no key available |
+| OpenAI API | `gpt-5-mini` | yes — 40 tests | **UNVERIFIED-LIVE** — no key available |
+| Gemini API | `gemini-3.7-flash` | yes — 40 tests | **verified 2026-08-20** — real call, 367 in / 40 out, $0.000425, drift detected |
+
+The Gemini row means a metered provider has now completed a real judge call end to end:
+`verification/judge-live-check.txt` records the request shape, the auth header, the model id, the
+response parse, both usage fields non-zero, the cost arithmetic, and the ledger moving by exactly
+the amount charged. That is the thing a contract test cannot prove — that the vendor still speaks
+the protocol today.
+
+**Anthropic and OpenAI stay UNVERIFIED-LIVE**, because no key for either is available here. A row
+that said "verified" because a *different* provider passed would be exactly the claim this
+project keeps refusing to make.
 
 **UNVERIFIED-LIVE means exactly what it says.** `tests/judge-providers.test.ts` drives each
 adapter against that vendor's published request and response schema with the transport stubbed,
@@ -129,8 +230,47 @@ export OPENAI_API_KEY=...        # or ANTHROPIC_API_KEY / GEMINI_API_KEY
 usewarden judge-check            # one real call, prints provider, tokens, cost, verdict, PASS/FAIL
 ```
 
-The full procedure is `ops/JUDGE-LIVE-CHECK.md`. These rows will say "verified <date>" when it
-has been run, and not before.
+The full procedure is `ops/JUDGE-LIVE-CHECK.md`, and `./scripts/judge-live.sh` runs it with the
+key read from your macOS Keychain so it is never pasted into a shell, echoed, or written down.
+These rows will say "verified <date>" when a check passes, and not before.
+
+### Which judge usewarden picks
+
+**Cheapest-capable, not first-key-found.** Usewarden's own judge spend lands on *your* bill, so
+when more than one key is present it defaults to the one that costs you least. The order is
+computed from the price table in `src/engine/judge.ts`, not written down beside it — re-check a
+price and the ordering corrects itself.
+
+Ranked by what one representative judge call (~500 input, ~50 output tokens) costs, at prices
+checked on 2026-08-20:
+
+| Rank | Provider | Model | Input $/MTok | Output $/MTok | Per call |
+|---|---|---|---|---|---|
+| 1 | OpenAI | `gpt-5-mini` | $0.25 | $2.00 | ~$0.000225 |
+| 2 | Gemini | `gemini-3.7-flash` | $0.75 | $3.75 | ~$0.000563 |
+| 3 | Anthropic | `claude-haiku-4-5` | $1.00 | $5.00 | ~$0.000750 |
+
+`usewarden judge-check` prints this ranking and marks which keys are present, so the choice is
+never invisible.
+
+**"Capable" is doing real work in that phrase.** Every vendor sells something cheaper than the
+tier above — `gpt-5-nano` at $0.05/$0.40, `gemini-3.5-flash-lite` at $0.30/$2.50. Usewarden does
+not default to them. The judge is a security control whose failure mode is a *missed* drift, it
+fails quiet, and usewarden has never verified that a high-throughput nano/lite tier holds up on
+this task. Defaulting to one would make your first judge call an unadvertised experiment on a
+control you are trusting.
+
+If you want that trade, take it in one line — and usewarden will tell you it can no longer price
+the result:
+
+```yaml
+# usewarden.yaml
+judge:
+  model: gemini-3.5-flash-lite
+```
+
+Token counts stay exact; the dollar column becomes an estimate at the default tier's rates, and
+every surface that shows it says so.
 
 **A judge that is down is not a guardrail that is down.** Every failure above fails OPEN with a
 loud warning, and Layer 1 keeps running unchanged. The dollar figures are estimates at prices
@@ -256,7 +396,7 @@ Stated plainly, because a security tool that oversells is worse than none.
 - **The Layer-2 judge fails open.** If it is unavailable, unaffordable, or unparseable, usewarden
   says so loudly and carries on with Layer 1. It will never block on a judge's say-so, and it can
   be wrong in both directions.
-- **Layer 1 catches 88.2% of the sabotage suite, not 100%.** The gap is semantic drift, which is
+- **Layer 1 catches 15 of the 17 sabotage scenarios, not all of them.** The gap is semantic drift, which is
   exactly what Layer 2 is for — and Layer 2 is sampled, not exhaustive.
 - **A hook that is not registered does not fire.** That is why `usewarden status` says
   **UNPROTECTED** in red and exits non-zero, and why there is an A/B test proving the difference
@@ -274,6 +414,7 @@ Stated plainly, because a security tool that oversells is worse than none.
 | `usewarden status` | protection state, counters, the 4-item checklist. Exit 1 if not protected |
 | `usewarden demo` | four real incident cards from a temp fixture, in about a second |
 | `usewarden incidents [n]` | the incident wall |
+| `usewarden metrics` | every number usewarden reports, how it was derived, and what it refuses to estimate. Exit 1 if the figures do not add up |
 | `usewarden dashboard [port]` | local read-only dashboard on 127.0.0.1 |
 | `usewarden doctor` | why usewarden might not be firing |
 | `usewarden policy` | the effective policy and where each part came from |
@@ -281,7 +422,7 @@ Stated plainly, because a security tool that oversells is worse than none.
 | `usewarden unlock [--minutes N]` / `lock` | suppress TAMPERED while you edit your own config |
 | `usewarden uninstall` | remove usewarden's hook entries |
 | `usewarden restore-configs [dir]` | byte-identical restore from a backup |
-| `usewarden telemetry <on\|off\|status>` | opt in or out — off by default |
+| `usewarden telemetry <on\|off\|status>` | opt in or out — off by default, and consent is a receipt, not a flag |
 
 Every command supports `--json`. Colour is semantic only and honours `NO_COLOR`; nothing
 degrades badly when stdout is a pipe.
@@ -321,12 +462,62 @@ Unknown keys are a **hard error**, not a silent no-op — a typo cannot quietly 
 
 ---
 
+## The numbers
+
+"Actions blocked" is the figure on the dashboard, in the status line, and in every screenshot
+this tool would be judged by. A marketing number that cannot be audited is a claim, so:
+
+- **Derived, never counted.** Every figure is computed by query when you ask for it, not read
+  from a running counter. It can be recomputed and corrected; a counter can only be wrong
+  forever.
+- **Real sessions only.** Every incident records where it came from — `live`, `demo`, or
+  `fixture`. A `usewarden demo` run cannot move a headline figure. It is recorded, labelled, and
+  reported on its own row.
+- **Retries do not multiply.** Attempts and *distinct* actions are reported side by side. An
+  agent retrying the same blocked read five times is five attempts against one action.
+- **Estimates say so.** Token and dollar savings are shown as a range, never a point, with every
+  constant printed by `usewarden metrics`.
+- **Some things are never priced.** "Your API key did not reach a model context" is counted and
+  named. Converting it to a dollar figure would be inventing precision.
+- **Overhead sits beside savings**, not netted off behind your back.
+- **The arithmetic is re-checked on every read.** If the figures cannot be true — more blocked
+  actions than inspected events, say — usewarden says so in red and exits non-zero rather than
+  printing them.
+
+```console
+$ usewarden metrics
+
+  ORIGIN         BLOCKED  DISTINCT  DRIFT  EVENTS  SESSIONS
+  real sessions  9        7         13     76      13
+  demo           12       8         0      12      3
+  fixture/tests  0        0         0      0       0
+```
+
+Full method, every constant and its reasoning, and what would make the estimate a measurement
+rather than an estimate: **[docs/METRICS.md](docs/METRICS.md)**.
+
+---
+
 ## Telemetry
 
 Off by default. v1 ships **no endpoint at all**: `usewarden telemetry on` writes a line to a local
 JSONL file and nothing leaves the machine. `DO_NOT_TRACK=1` and `USEWARDEN_TELEMETRY=0` are both
 honoured. The exact payload — counts and coarse categories, never a path, prompt, command or file
 content — is documented in **[docs/TELEMETRY.md](docs/TELEMETRY.md)** and asserted by a test.
+
+**Consent is a receipt, not a flag.** Opting in shows you the exact payload first, then records a
+receipt naming the schema version and every field it covers. Three things follow, each with a
+test:
+
+- setting the flag in usewarden's database does not opt you in — without a valid receipt,
+  telemetry stays off and says why;
+- if the payload ever gains a field, every existing receipt lapses and telemetry switches itself
+  off until you read the new one and agree again;
+- the receipt's digest binds its field list, so it cannot be edited to cover more than was agreed.
+
+The counts are real-session counts, computed the same way as everything above: a demo run cannot
+move a number that would leave the machine. `usewarden telemetry off --purge` also deletes every
+payload recorded locally.
 
 ---
 
@@ -340,7 +531,7 @@ Node **≥ 22.13.0** (Node 22 *Jod* and 24 *Krypton* are the Active LTS lines; 2
 ```bash
 npm install
 npm run build
-npm test                          # 247 tests, no network, no API keys required
+npm test                          # 427 tests, no network, no API keys required
 ./scripts/verify-all.sh           # every gate: build, both Node lines, fixtures, screenshots, CLI smoke
 ./scripts/make-fixture.sh         # build the sabotage fixture
 ./scripts/screenshot-synthetic.sh # re-render the published screenshots

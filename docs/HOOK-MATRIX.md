@@ -220,13 +220,30 @@ matrix — a row only says "live" if something actually ran:
 |---|---|---|---|
 | `local-claude` | `claude` is on PATH and authenticated | yes | **yes** — 12 sessions, 2 drift catches |
 | `local-gemini` | `gemini` is on PATH and authenticated | yes | partial — no key on the build machine |
-| `anthropic` | `ANTHROPIC_API_KEY` set | yes — `tests/judge-providers.test.ts` | **UNVERIFIED-LIVE** |
-| `openai` | `OPENAI_API_KEY` set | yes — `tests/judge-providers.test.ts` | **UNVERIFIED-LIVE** |
-| `gemini` | `GEMINI_API_KEY` set | yes — `tests/judge-providers.test.ts` | **UNVERIFIED-LIVE** |
+| `anthropic` | `ANTHROPIC_API_KEY` set | yes — `tests/judge-providers.test.ts` | **UNVERIFIED-LIVE** — no key available on the build machine |
+| `openai` | `OPENAI_API_KEY` set | yes — `tests/judge-providers.test.ts` | **UNVERIFIED-LIVE** — no key available on the build machine |
+| `gemini` | `GEMINI_API_KEY` set | yes — `tests/judge-providers.test.ts` | **verified 2026-08-20** — real call: 367 in / 40 out, $0.000425, ledger moved by the same, drift detected (`verification/judge-live-check.txt`) |
 
-Selection order is fixed: Anthropic, then OpenAI, then Gemini, then a local CLI. `usewarden
-judge-check` makes one real call and prints which provider answered, what it cost, and whether
-the ledger moved by the same amount. Procedure: `ops/JUDGE-LIVE-CHECK.md`.
+**Gemini is the first metered provider proved end to end.** `./scripts/judge-live.sh` ran with
+`USEWARDEN_JUDGE_NO_LOCAL=1`, so the metered path was the one exercised, and all five PASS
+conditions held: provider `gemini` (not `local-gemini`), non-zero tokens on both sides, ledger
+delta equal to the computed cost, drift correctly detected on an unambiguous scenario, exit 0.
+
+**Two Gemini key formats are live in the wild** and usewarden handles both: `AQ.` + ~50
+characters (current, 53 total) and `AIza` + 35 (legacy, 39 total). Google publishes no key-format
+specification. The redactor was found knowing only the legacy shape on 2026-08-20 — a
+launch-blocking leak for anyone holding a new key — and now matches both *and* strips the exact
+configured key by identity, which depends on no format at all.
+
+**Selection order is CHEAPEST-CAPABLE, computed from the price table** (`rankedProviders()` in
+`src/engine/judge.ts`), not a fixed list. At prices checked 2026-08-20, for one representative
+call of ~500 input and ~50 output tokens: `openai/gpt-5-mini` ~$0.000225, then
+`gemini/gemini-3.7-flash` ~$0.000563, then `anthropic/claude-haiku-4-5` ~$0.000750, then a local
+CLI. Usewarden's judge spend lands on the user's bill, so the default is the one that costs them
+least; a hand-written order would be a second copy of the pricing information, and the two would
+drift. `usewarden judge-check` prints the ranking, which keys are present, what the call cost,
+and whether the ledger moved by the same amount. Procedure: `ops/JUDGE-LIVE-CHECK.md`, or
+`./scripts/judge-live.sh` to run it with the key held in the macOS Keychain.
 
 ---
 
