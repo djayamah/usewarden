@@ -9,18 +9,20 @@ tests that prove them, in **[docs/THREAT-MODEL.md](docs/THREAT-MODEL.md)**.
 
 **Please do not open a public issue for a security problem.**
 
-Use GitHub's private vulnerability reporting on this repository
-(*Security → Report a vulnerability*). That opens a private advisory thread visible only to the
-maintainers and to you. It is the preferred route: it needs no email round-trip and it produces
-the advisory record automatically.
+Use **GitHub's private vulnerability reporting** on this repository:
+[**Report a vulnerability**](https://github.com/djayamah/usewarden/security/advisories/new)
+(also reachable from *Security → Advisories*).
 
-If you cannot use it, or you want the report encrypted, email:
+That opens a private thread visible only to you and the maintainers. It is the whole channel, not
+a first step — it needs no email round-trip, it works without you knowing anybody's address, it
+cannot bounce or sit in a spam folder, and it produces the advisory record automatically if the
+report is accepted.
 
-> **`SECURITY_CONTACT_PLACEHOLDER`**
->
-> *(Maintainer: replace this line with the disclosure address before announcing the project.
-> Leaving the placeholder in place is deliberate — an address invented here would bounce, and a
-> bouncing security contact is worse than none.)*
+**There is deliberately no email address here.** A published personal address is a permanent
+liability that cannot be rotated, and an invented or stale one is worse than none: a security
+contact that bounces converts a responsible reporter into a public issue. If GitHub's form is
+unavailable to you for any reason, open a public issue saying only *"I would like to report a
+security issue privately"* with **no details**, and a maintainer will reply with a route.
 
 Please include:
 - usewarden version (`usewarden --version`), Node version, and OS;
