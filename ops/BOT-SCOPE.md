@@ -4,9 +4,7 @@ Read this before enabling anything in `bots/`.
 
 ## What the bot is
 
-A **separate, isolated service.** It is not an Athena/OpenClaw skill, it shares no code path with
-the founder's personal agent setup, and it has no route to any personal system. It runs as a
-GitHub Actions job in this repository, from this repository's checkout, and nowhere else.
+A **separate, isolated service.** It is not a plugin or a skill inside the founder's personal agent setup, shares no code path with it, and has no route to any personal system. It runs as a GitHub Actions job in this repository, from this repository's checkout, and nowhere else.
 
 ## Channels
 
