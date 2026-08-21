@@ -7,6 +7,34 @@ for the same thing with every constant included so you can recompute it yourself
 
 ---
 
+## 0. How do I monitor what usewarden has caught, and see its impact?
+
+*This section exists because it was missing, and the absence was found the hard way: a user asked
+how to "monitor the impact" and the triage bot correctly reported that nothing matched — the words
+`monitor`, `monitoring`, `impact`, `track` and `caught` appeared **zero** times in this file. The
+rest of this document is written in the vocabulary of the person who built the counters; this part
+is written in the words people actually ask in.*
+
+**Three commands for tracking what usewarden has caught and what impact it has had:**
+
+```bash
+usewarden incidents     # the incident wall — every catch, as a readable card
+usewarden metrics       # the impact figures, and what they refuse to estimate
+usewarden dashboard     # the same, in a browser, read-only, on 127.0.0.1
+```
+
+`usewarden incidents` is the one to look at if you want to know whether usewarden is earning its
+place. One card per catch: when, which agent, what it tried, and the policy line that stopped it.
+A week of real sessions with an empty wall is a genuine answer, and so is a full one. Catches from
+`usewarden demo` are labelled `demo` and never move the headline figures.
+
+`usewarden metrics` reports impact as a band, never a single number, and refuses to price what
+cannot be priced — a leaked credential and an executed shell command are counted and never valued.
+Read §4.6 before quoting any of it. Guardian overhead is shown beside the savings and never netted
+off them.
+
+Nothing here leaves your machine; monitoring usewarden means reading your own local database (§8).
+
 ## 1. The rule
 
 **A number usewarden displays must be one that neither you nor usewarden can accidentally inflate.**

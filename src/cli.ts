@@ -14,7 +14,7 @@ import { bad, box, checkbox, dim, head, ok, paint, stateBadge, table, warn } fro
 
 const VERSION = '0.1.0';
 
-const USAGE = `usewarden ${VERSION} - a firewall for your AI coding agents
+const USAGE = `usewarden ${VERSION} - a guardrail for your AI coding agents
 
 USAGE
   usewarden <command> [options]

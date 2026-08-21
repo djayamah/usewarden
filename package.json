@@ -1,7 +1,7 @@
 {
   "name": "usewarden",
   "version": "0.1.0",
-  "description": "A firewall for your AI coding agents — watches every agent on your machine for drift, blocks out-of-scope actions, and shows you what it caught.",
+  "description": "Stop your AI coding agent before it touches something it shouldn't. A local guardrail for Claude Code, Cursor, Gemini CLI and more: blocks out-of-scope writes, .env reads, rm -rf and force pushes, with no API key and zero tokens.",
   "license": "MIT",
   "type": "module",
   "bin": {
