@@ -1,6 +1,7 @@
 import { AGENT_SIGNALS, ALLOWED_LABELS, FAILURE_MODES, type FailureMode, type Route } from './knowledge.js';
 import { assertAnswerIsSafe, botProseOnly, buildAnswer, type Answer } from './answer.js';
 import type { Corpus } from './corpus.js';
+import { classifyIntent, type Intent } from './intent.js';
 
 /**
  * The triage decision — a PURE function of the issue text.
@@ -34,6 +35,10 @@ export interface Issue {
 }
 
 export interface TriageResult {
+  /** What the reporter WANTED, decided before anything else. See intent.ts. */
+  intent: Intent;
+  /** Why that intent was chosen. For the run log and the tests; never shown to the reporter. */
+  intentWhy: string;
   route: Route;
   matches: FailureMode[];
   labels: string[];
@@ -55,11 +60,22 @@ export const FORBIDDEN_PHRASES: RegExp[] = [
   /\bi (have |'ve )?(fixed|resolved|patched)\b/i,
 ];
 
-const IDENTITY = '_🤖 **Automated triage — I am a bot.** I match the issue text against this '
-  + "project's own recorded defects and quote from its documents. **Everything substantive above "
-  + 'is a direct quotation from a file in this repository, linked so you can check it.** I do not '
-  + 'answer from general knowledge, I have not reproduced anything, I cannot fix anything, I never '
-  + 'close issues, and I never promise a timeline. A human reads every issue._';
+/**
+ * The disclosure claimed "everything substantive above is a direct quotation" even when the bot
+ * had quoted NOTHING — which is a false statement, made by the component whose entire purpose is
+ * not making false statements. It is now conditional on there being a quotation.
+ */
+function identity(quoted: boolean): string {
+  return '_🤖 **Automated triage — I am a bot.** I match the issue text against this '
+    + "project's own recorded defects and quote from its documents. "
+    + (quoted
+      ? '**Everything substantive above is a direct quotation from a file in this repository, '
+        + 'linked so you can check it.** '
+      : '**I found nothing in those documents that answers this, so I have quoted nothing and '
+        + 'guessed at nothing.** ')
+    + 'I do not answer from general knowledge, I have not reproduced anything, I cannot fix '
+    + 'anything, I never close issues, and I never promise a timeline. A human reads every issue._';
+}
 
 const NEVER_PASTE = '**Please never paste an API key, token, or `.env` contents into an issue.** '
   + '`usewarden status --json` and `usewarden judge-check` are both built to report what a '
@@ -114,67 +130,131 @@ export function looksLikeQuestion(issue: Issue): boolean {
 }
 
 export function triage(issue: Issue, corpus?: Corpus): TriageResult {
-  const matches = matchFailureModes(issue);
+  // ---------------------------------------------------------------------------------------
+  // INTENT FIRST. Everything below is downstream of it.
+  //
+  // It used to be the other way round: failure modes were matched first, and when nothing
+  // matched the defect-triage template went out regardless of what the person had asked. That
+  // shape is what put "Thanks for the report", a demand for `usewarden status --json` and a
+  // credential warning under a beginner's question about pricing, in public. Narrowing signals
+  // fixed two instances of it and could never fix the class.
+  // ---------------------------------------------------------------------------------------
+  const { intent, why: intentWhy } = classifyIntent(issue);
+
+  const matches = intent === 'question' || intent === 'feature' ? [] : matchFailureModes(issue);
   const hasEnv = hasEnvironmentInfo(issue);
 
-  // Security routing wins over everything: a possible credential exposure is not a "needs-info".
+  // A FEATURE REQUEST gets no retrieval answer at all. The corpus documents what usewarden does,
+  // not what it will do; answering "any chance of windows support" from whatever scores highest
+  // is how a bot invents a plan it has no standing to promise.
+  let answer: Answer | undefined;
+  if (corpus && intent !== 'feature') {
+    const query = `${issue.title} ${issue.body}`.slice(0, 2000);
+    // The intent is passed in rather than sniffed out of the text. Beginner questions rarely
+    // carry a question mark, and `?`-sniffing is what let DECISIONS.md answer a pricing question.
+    // THREE quotations for a question, two for a bug report. Someone who asks three things
+    // deserves three answers; two slots against a body that asks about cost AND about privacy
+    // means one of them goes unanswered, and it will be the one the retriever was least sure
+    // about - which is exactly the one that needed answering. On a single-question issue the
+    // extra slot simply goes unused, because the floors still have to clear.
+    const a = buildAnswer(corpus, query, intent === 'question' ? 3 : 2, issue.title,
+      intent === 'question');
+    // For a question the retrieval result is the whole comment, so it is shown either way -
+    // including when it declined, because "I could not find this" is the honest answer and
+    // silence is not. For a bug report it is a bonus and only shown when it found something.
+    if (a.answered || intent === 'question') answer = a;
+  }
+  const answered = Boolean(answer?.answered);
+
   const security = matches.filter((m) => m.route === 'security');
-  const route: Route = security.length > 0 ? 'security'
+  const route: Route =
+      intent === 'security' ? 'security'
+    : security.length > 0 ? 'security'
+    : intent === 'feature' ? 'unmatched'
+    : intent === 'question' ? (answered ? 'likely-known' : 'unmatched')
     : matches.length === 0 ? 'unmatched'
     : !hasEnv ? 'needs-info'
     : (matches.find((m) => m.route === 'possible-regression') ? 'possible-regression' : 'likely-known');
 
-  // Labels are decided AFTER retrieval, because an answered question is not "unmatched" - it is
-  // a question that got an answer, and labelling it for a human to read properly is noise.
-  const baseLabels = [
+  const labels = [...new Set([
     ...matches.flatMap((m) => m.labels),
     ...agentLabels(issue),
-  ];
-
-  // Retrieval runs whenever there is a corpus: a defect report often contains a question too,
-  // and a quotation from the repo costs nothing and can only help.
-  let answer: Answer | undefined;
-  if (corpus) {
-    const query = `${issue.title} ${issue.body}`.slice(0, 2000);
-    const a = buildAnswer(corpus, query, 2, issue.title);
-    // An unanswered retrieval is only worth showing when there is nothing else to say.
-    if (a.answered || (matches.length === 0 && looksLikeQuestion(issue))) answer = a;
-  }
-
-  const answered = Boolean(answer?.answered);
-  // A question that got a quoted answer is `question`, not `unmatched` and not `needs-info`.
-  // Asking someone who has not installed it yet for `usewarden status --json` is worse than
-  // useless: it reads as a bot that did not understand the question.
-  const finalRoute: Route = answered && matches.length === 0 ? 'likely-known' : route;
-  const labels = [...new Set([
-    ...baseLabels,
-    ...(answered && matches.length === 0 ? ['question'] : []),
-    ...(!answered && route === 'needs-info' ? ['needs-info'] : []),
-    ...(!answered && route === 'unmatched' ? ['unmatched'] : []),
+    ...(intent === 'question' ? ['question'] : []),
+    ...(intent === 'feature' ? ['enhancement'] : []),
+    ...(intent === 'security' ? ['security'] : []),
+    // `unmatched` means "a human needs to read this properly". A question that got a quoted
+    // answer is not unmatched, and labelling it so is noise on top of a correct answer.
+    ...(intent === 'question' && !answered ? ['unmatched'] : []),
+    ...(intent === 'bug' && matches.length === 0 ? ['unmatched'] : []),
+    ...(intent === 'bug' && matches.length > 0 && !hasEnv ? ['needs-info'] : []),
   ])].filter((l) => ALLOWED_LABELS.includes(l)).sort();
 
-  const askForEnv = !hasEnv && !answered;
-  const comment = renderComment(issue, matches, route, !askForEnv, answer);
+  const comment = renderComment(issue, matches, route, hasEnv, answer, intent);
   assertAnswerIsSafe(comment);
 
   return {
-    route: finalRoute,
+    intent,
+    intentWhy,
+    route,
     matches,
     labels,
     comment,
-    needsClassifier: matches.length === 0 && !answered,
+    needsClassifier: !answered && matches.length === 0 && intent !== 'feature',
     ...(answer ? { answer } : {}),
   };
 }
 
 export function renderComment(
   issue: Issue, matches: FailureMode[], route: Route, hasEnv: boolean, answer?: Answer,
+  intent: Intent = 'bug',
 ): string {
-  // "Thanks for the report" is wrong for someone asking a question before they have installed
-  // anything. Small, and it is the first thing they read.
-  const out: string[] = [answer?.answered && matches.length === 0
-    ? 'Thanks for asking — here is the answer from the documentation.'
-    : 'Thanks for the report.', ''];
+  const answered = Boolean(answer?.answered);
+
+  // -----------------------------------------------------------------------------------------
+  // A QUESTION GETS AN ANSWER AND NOTHING ELSE.
+  //
+  // No "thanks for the report", no failure-mode template, no environment ask, and no credential
+  // warning. Every one of those was in the comment a beginner received for asking whether the
+  // tool costs money, and each one was individually defensible - the credential warning in
+  // particular was a footer on EVERY comment the bot wrote, which is exactly why it reached
+  // someone it had nothing to do with. Boilerplate that goes out regardless of what was asked
+  // is boilerplate nobody chose to send.
+  // -----------------------------------------------------------------------------------------
+  if (intent === 'question') {
+    const out: string[] = [answered
+      ? 'Thanks for asking — here is the answer from the documentation.'
+      : 'Thanks for asking.', ''];
+    if (answer) out.push(answer.body, '');
+    if (!answered) {
+      out.push('I could not find an answer to this in the published documents, so rather than '
+        + 'guess I have left it for a human to answer properly. Nothing is wrong with the '
+        + 'question — it usually just means the docs do not cover it yet.', '');
+    }
+    out.push('---', identity(answered));
+    return out.join('\n');
+  }
+
+  // -----------------------------------------------------------------------------------------
+  // A FEATURE REQUEST gets an acknowledgement, and no invented plan.
+  // -----------------------------------------------------------------------------------------
+  if (intent === 'feature') {
+    return [
+      'Thanks — this reads as a feature request rather than a bug, so I have labelled it '
+      + '`enhancement` and left it for a human.',
+      '',
+      'I answer only from this repository\'s published documents, and they describe what '
+      + 'usewarden does today rather than what it will do. There is no roadmap document here for '
+      + 'me to quote, so I am not going to guess at one — a maintainer will reply.',
+      '',
+      '---',
+      identity(false),
+    ].join('\n');
+  }
+
+  // -----------------------------------------------------------------------------------------
+  // A DEFECT REPORT, or a security report. This is the only path the triage template runs on.
+  // -----------------------------------------------------------------------------------------
+  const out: string[] = ['Thanks for the report.', ''];
 
   if (answer) { out.push(answer.body, ''); }
 
@@ -206,7 +286,7 @@ export function renderComment(
       out.push(`  - *Where a human can check:* ${m.evidence}`);
     }
     out.push('');
-  } else if (!answer?.answered) {
+  } else if (!answered) {
     out.push("I could not match this to any failure mode I know about, so I have labelled it "
       + '`unmatched` for a human to read properly. That is not a judgement about the report — it '
       + 'usually just means it is something new.', '');
@@ -215,7 +295,7 @@ export function renderComment(
   if (!hasEnv) out.push(ENVIRONMENT_ASK, '');
   if (route !== 'security') out.push(NEVER_PASTE, '');
 
-  out.push('---', IDENTITY);
+  out.push('---', identity(answered));
   return out.join('\n');
 }
 
