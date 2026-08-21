@@ -52,6 +52,14 @@ Node ≥ 22.13. Zero runtime dependencies. No install scripts. MIT.
 
 ## FAQ
 
+**Is it free?**
+Yes. usewarden is free and open source under the MIT licence, and there is no paid tier, no
+account, and nothing to sign up for. The blocking — Layer 1 — costs nothing to run: it is
+deterministic pattern and scope matching, so it makes no API calls and consumes no tokens. The
+only thing that can ever cost money is the optional Layer 2 drift judge, and only if you point it
+at a paid API with **your own key**; leave it unconfigured and usewarden says so and keeps
+blocking. See *Do I need an API key?* below.
+
 **Does this send my code anywhere?**
 No. Layer 1 is entirely local and never leaves your machine. Telemetry is off by default and this
 version ships **no endpoint at all** — there is nowhere for a payload to go even if it were built
@@ -531,7 +539,7 @@ Node **≥ 22.13.0** (Node 22 *Jod* and 24 *Krypton* are the Active LTS lines; 2
 ```bash
 npm install
 npm run build
-npm test                          # 427 tests, no network, no API keys required
+npm test                          # 310 tests, no network, no API keys required
 ./scripts/verify-all.sh           # every gate: build, both Node lines, fixtures, screenshots, CLI smoke
 ./scripts/make-fixture.sh         # build the sabotage fixture
 ./scripts/screenshot-synthetic.sh # re-render the published screenshots

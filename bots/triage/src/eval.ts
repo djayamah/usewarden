@@ -149,7 +149,12 @@ export function runEndToEnd(corpus: Corpus, cases: EvalCase[] = EVAL_SET): EvalR
   return cases.map((c, i) => {
     const r = triage(asIssue(c, i + 1), corpus);
     const identifies = r.comment.includes('Automated triage');
-    const declined = r.answer !== undefined && !r.answer.answered;
+    // "Declined" means the bot did not answer from the corpus. There are TWO shapes of that and
+    // this only understood one: an answer object that declined. A roadmap question is now routed
+    // as a feature request, which produces no answer object at all - the bot refuses to invent a
+    // plan and says so - and the harness scored that correct behaviour as "answered when it
+    // should have declined". Measuring the property rather than one of its shapes.
+    const declined = r.answer === undefined || !r.answer.answered;
     const passed = c.expectDecline
       ? declined && identifies
       : Boolean(r.answer?.answered && c.expectCites!.some((f) => r.answer!.citations.includes(f))) && identifies;

@@ -35,16 +35,21 @@ describe('bot: it answers from the repository, never from the model', () => {
     assert.match(a.body, /github\.com\/djayamah\/usewarden\/blob\/main/, 'the citation must be a link');
   });
 
-  test('the answer is a QUOTATION - every substantive line appears verbatim in the cited file', () => {
+  test('the answer is a QUOTATION - every substantive line appears verbatim in a cited file', () => {
     const a = buildAnswer(corpus, 'What telemetry does usewarden collect?');
     assert.equal(a.answered, true);
-    const source = fs.readFileSync(path.join(REPO, a.citations[0]!), 'utf8');
+    // Checked against ANY cited file, not just the first: an answer may quote several sources,
+    // and the property that matters is that no emitted line was invented, not which file it came
+    // from. The earlier version pinned every line to citations[0] and broke the moment a
+    // multi-question issue produced a multi-source answer.
+    const sources = [...new Set(a.citations)].map((c) => fs.readFileSync(path.join(REPO, c), 'utf8'));
+    assert.ok(sources.length > 0, 'setup failed - no citations');
     const quoted = a.body.split('\n').filter((l) => l.startsWith('> ')).map((l) => l.slice(2).trim())
       .filter((l) => l.length > 40 && !l.startsWith('[…]'));
     assert.ok(quoted.length > 0, 'setup failed - nothing was quoted');
     for (const line of quoted) {
-      assert.ok(source.includes(line),
-        `the bot emitted a line that is NOT in ${a.citations[0]}: ${JSON.stringify(line.slice(0, 80))}`);
+      assert.ok(sources.some((src) => src.includes(line)),
+        `the bot emitted a line that is in NONE of ${a.citations.join(', ')}: ${JSON.stringify(line.slice(0, 80))}`);
     }
   });
 
@@ -71,6 +76,91 @@ describe('bot: it answers from the repository, never from the model', () => {
       assert.equal(forbidden.test(c.file), false,
         `${c.file} is an internal document and must never be quoted into a public issue`);
     }
+  });
+});
+
+/**
+ * REGRESSION, from the first issue this bot ever answered in public.
+ *
+ * A confused new user wrote a genuinely typical issue: two real questions wrapped in "hi, saw
+ * this on github" and "sorry if this is obvious, im not very technical". The bot DECLINED, told
+ * them to run `usewarden status --json` — which they could not, having not installed it — and
+ * then claimed in its own disclosure that everything above was a direct quotation, when it had
+ * quoted nothing.
+ *
+ * Coverage on the whole body was 0.19. On the single sentence "does it need one of those api
+ * keys to work?" it was 0.40. Every eval question is one clean sentence, so the eval set could
+ * not have caught this: real issues are rambling and polite and ask more than one thing.
+ */
+describe('bot: a real issue, phrased the way a confused person actually writes', () => {
+  const REAL_ISSUE: Issue = {
+    number: 9, user: 'newuser',
+    title: 'confused - do i need to pay for something?',
+    body: [
+      'hi. saw this on github and it looks useful but im not sure i understand it properly.',
+      '',
+      'does it need one of those api keys to work? i dont really want to sign up for anything or',
+      'pay a monthly fee just to try it.',
+      '',
+      'also - does it upload my project somewhere to check it? my work stuff is on the same laptop',
+      'and i would rather nothing left the machine.',
+      '',
+      'sorry if this is obvious, im not very technical. using claude code on a mac.',
+    ].join('\n'),
+  };
+
+  test('it ANSWERS, with citations, rather than declining', () => {
+    const r = triage(REAL_ISSUE, corpus);
+    assert.equal(r.answer?.answered, true,
+      'declined a question the README answers on its front page');
+    assert.ok(r.answer!.citations.length > 0, 'answered with no citation');
+    for (const c of r.answer!.citations) {
+      assert.equal(fs.existsSync(path.join(REPO, c)), true, `cited a file that does not exist: ${c}`);
+    }
+  });
+
+  test('it does NOT route an ordinary question as a security report', () => {
+    const r = triage(REAL_ISSUE, corpus);
+    assert.notEqual(r.route, 'security',
+      'told someone asking whether a key is needed to file a vulnerability advisory');
+    assert.equal(/advisories\/new/.test(r.comment), false);
+    assert.equal(r.labels.includes('security'), false);
+  });
+
+  test('it does not ask an uninstalled user to run a diagnostic command', () => {
+    const r = triage(REAL_ISSUE, corpus);
+    // The ENV-ASK block specifically. The credential warning also names `status --json`, and an
+    // assertion that cannot tell those apart fails on the safety notice rather than the defect.
+    assert.equal(/To make this actionable, could you add/.test(r.comment), false,
+      'asked for diagnostics from someone who has not installed it');
+  });
+
+  test('the disclosure never claims a quotation that is not there', () => {
+    const answered = triage(REAL_ISSUE, corpus);
+    assert.match(answered.comment, /Everything substantive above is a direct quotation/);
+
+    const unanswerable = triage(
+      { number: 10, user: 'u', title: 'roadmap for windows support next quarter?', body: 'when will you ship windows and what is the roadmap' },
+      corpus);
+    // "Did not answer from the corpus" has two shapes: an answer object that declined, and no
+    // answer object at all - which is what a roadmap question produces now that it is routed as a
+    // feature request and the bot refuses to invent a plan. The property is the same either way,
+    // and asserting one shape scored the correct behaviour as a failure.
+    assert.equal(unanswerable.answer?.answered ?? false, false,
+      'setup failed - this should not be answerable');
+    assert.equal(/Everything substantive above is a direct quotation/.test(unanswerable.comment), false,
+      'claimed a quotation when it had quoted nothing');
+    assert.match(unanswerable.comment, /quoted nothing and\s+guessed at nothing/);
+  });
+
+  test('a rambling body is answered on BOTH of the things it asks about', () => {
+    const r = triage(REAL_ISSUE, corpus);
+    // Assert the substance, not one heading: the reader asked about cost and about data leaving
+    // the machine, and more than one passage in the README answers the second.
+    assert.match(r.comment, /Do I need an API key/i, 'the cost question is unanswered');
+    assert.match(r.comment, /never leaves your machine|no endpoint at all|Telemetry/i,
+      'the "does it leave my machine" question is unanswered');
+    assert.ok((r.answer?.citations.length ?? 0) >= 2, 'a two-question issue should quote more than once');
   });
 });
 
@@ -170,9 +260,33 @@ describe('bot: the things it must never do', () => {
     }
   });
 
-  test('it warns against pasting credentials', () => {
-    assert.match(triage(issue('my key is rejected', 'gemini api key 401'), corpus).comment,
-      /never paste an API key/i);
+  test('it warns against pasting credentials ON A DEFECT REPORT, and never on a question', () => {
+    // A/B, because the failure was not "the warning is wrong" but "the warning is unconditional".
+    // It was a footer on EVERY comment, which is how it reached a beginner asking about pricing.
+    const report = triage(issue('my key is rejected', 'gemini api key 401'), corpus);
+    assert.equal(report.intent, 'bug', 'a rejected credential is a defect report');
+    assert.match(report.comment, /never paste an API key/i,
+      'the one place the warning belongs is where someone might paste a key');
+
+    const question = triage(issue('confused - do i need to pay for something?',
+      'sorry if this is obvious, im not very technical. does it need one of those api keys to work?'),
+    corpus);
+    assert.equal(question.intent, 'question');
+    assert.equal(/never paste an API key/i.test(question.comment), false,
+      'warned a beginner about pasting credentials for asking whether the tool costs money');
+    assert.equal(/usewarden status --json/.test(botProseOnly(question.comment)), false,
+      'asked a question-asker for diagnostics');
+    assert.equal(/Thanks for the report/.test(question.comment), false,
+      'called a question a report');
+  });
+
+  test('the prose guard still catches the bot claiming a fix, and ignores a cited FILENAME', () => {
+    // The guard now skips citation headers, so this proves it did not become vacuous: a filename
+    // containing the word is allowed, a sentence the bot wrote containing it is refused.
+    const header = '**From [`verification/live/12-dotenv-bypass-fixed.txt`](https://github.com/djayamah/usewarden/blob/main/verification/live/12-dotenv-bypass-fixed.txt) — *x*:**\n\nAutomated triage';
+    assert.doesNotThrow(() => assertCommentIsSafe(header), 'a cited filename is not a claim');
+    assert.throws(() => assertCommentIsSafe('This is fixed already.\n\nAutomated triage'),
+      /forbidden phrase/, 'the guard must still catch the bot claiming a fix');
   });
 });
 
