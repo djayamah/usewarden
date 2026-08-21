@@ -25,7 +25,18 @@ CHANGED=0
 # CLAUDE.md's path rules only work as a fence if they name the real paths, and redacting the
 # founder's original spec would make the historical record say something that was never true.
 # The first run of this script redacted exactly those files, which is why the list exists.
-INTERNAL='^(CLAUDE\.md|SPEC-BUILD\.md|PROGRESS\.md|FINAL-REPORT\.md|launch/|ops/SETUP-|\.claude/)'
+# The internal-only path list is READ, never restated. Two copies of this regex drifted once
+# already; see scripts/internal-only-paths.txt.
+internal_only_re() {
+  local f="$ROOT/scripts/internal-only-paths.txt"
+  [ -f "$f" ] || { echo "FATAL: scripts/internal-only-paths.txt is missing" >&2; exit 2; }
+  local frags
+  frags="$(sed 's/#.*//' "$f" | sed 's/[[:space:]]*$//' | grep -v '^$' | paste -sd'|' -)"
+  [ -n "$frags" ] || { echo "FATAL: scripts/internal-only-paths.txt is empty" >&2; exit 2; }
+  printf '^(%s)' "$frags"
+}
+
+INTERNAL="$(internal_only_re)"
 
 files() {
   git ls-files | grep -Ev "$INTERNAL" | while read -r f; do
@@ -48,7 +59,16 @@ apply() { # apply <perl-expr> <label>
 echo "=== SANITISE FOR PUBLICATION ==="
 
 # 1. absolute home paths -> a synthetic persona already used throughout the README.
-apply 's{/Users/'"$(id -un)"'/}{/Users/you/}g' "home paths -> /Users/you/"
+#
+# ANY home path, not just THIS account's. It was anchored to `$(id -un)`, which made the rule
+# work on the operator's machine and nowhere else: CI ran the same sanitiser, found nothing to
+# replace because $HOME there is /home/runner, and the publication rehearsal then caught
+# a home directory sitting in two verification artifacts that the local rehearsal had reported
+# clean. Same script, same input, two different answers, and the machine-specific one was the
+# reassuring one. The rule a published file actually needs is "no home directory belonging to
+# anybody", which is machine-independent and strictly stronger.
+apply 's{/Users/(?!you/)[A-Za-z0-9._-]+/}{/Users/you/}g' "home paths -> /Users/you/"
+apply 's{/home/(?!you/)(?!runner/)[A-Za-z0-9._-]+/}{/home/you/}g' "linux home paths -> /home/you/"
 
 # 2. hostname / account name / private project names, from the untracked identity file.
 if [ -f scripts/scan-identity.txt ]; then

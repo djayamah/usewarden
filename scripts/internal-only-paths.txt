@@ -1,0 +1,34 @@
+# INTERNAL-ONLY PATHS - the single source of truth for "never leaves this repository".
+#
+# One extended-regex fragment per line, anchored at the path start by the consumer. Blank lines
+# and #-comments are ignored.
+#
+# THREE scripts need this list and they need the SAME list:
+#   scripts/build-publish-tree.sh          drops these paths from the published tree
+#   scripts/sanitise-for-publication.sh    does NOT redact them, because they are dropped instead
+#   scripts/pre-public-scan.sh             does not report identity findings in them, same reason
+#
+# It lived as a copy-pasted regex in the first two, and they had ALREADY DRIFTED: the publisher
+# dropped `BUILD_COMPLETE`, `ops/MY-SETUP`, `scripts/progress-snapshot.sh` and
+# `verification/precompact-hook`; the sanitiser had never heard of any of them. That drift was
+# harmless only by luck - it went in the safe direction. A path the sanitiser skipped but the
+# publisher KEPT would have shipped unredacted, and nothing anywhere would have said so.
+# tests/packaging.test.ts now asserts every consumer reads this file and carries no list of its
+# own, so the next divergence is a test failure instead of a leak.
+#
+# The rule for adding a path: it is internal-only if redacting it would make it LIE. CLAUDE.md's
+# path rules only work as a fence if they name the real private paths; the founder's build spec
+# has to say what it actually said. Anything that can simply be redacted is redacted and
+# published instead. Changing what is published is the founder's decision, not a side effect of
+# a tooling change - this list is exactly what the publisher already excluded, nothing more.
+CLAUDE\.md
+SPEC-BUILD\.md
+PROGRESS\.md
+FINAL-REPORT\.md
+BUILD_COMPLETE
+launch/
+ops/SETUP-
+ops/MY-SETUP
+\.claude/
+scripts/progress-snapshot\.sh
+verification/precompact-hook
