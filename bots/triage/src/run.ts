@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { assertCommentIsSafe, triage, type Issue } from './triage.js';
 import { ALLOWED_LABELS } from './knowledge.js';
+import { Corpus } from './corpus.js';
 
 /**
  * The GitHub Actions entrypoint.
@@ -48,7 +49,7 @@ export interface RunOptions {
 
 export type RunOutcome =
   | { acted: false; reason: 'kill_switch_file' | 'kill_switch_variable' | 'already_commented'
-      | 'daily_cap' | 'bot_author' | 'issue_closed' }
+      | 'daily_cap' | 'bot_author' | 'issue_closed' | 'empty_corpus' }
   | { acted: true; route: string; labels: string[] };
 
 export async function run(opts: RunOptions): Promise<RunOutcome> {
@@ -90,7 +91,24 @@ export async function run(opts: RunOptions): Promise<RunOutcome> {
     return { acted: false, reason: 'daily_cap' };
   }
 
-  const result = triage(issue);
+  // BUILD THE CORPUS FROM THE CHECKOUT, and pass it. This line is the whole of defect D-164:
+  // it read `triage(issue)`, the corpus argument was optional, and the production bot therefore
+  // ran with no documents and declined every answerable question in public.
+  //
+  // The corpus is built here rather than in triage() on purpose - triage() is pure and testable,
+  // and reading the filesystem inside it would make every test touch the disk. What changed is
+  // that omitting it is now impossible: the parameter is required.
+  const corpus = new Corpus(opts.repoRoot);
+  if (corpus.size === 0) {
+    // A corpus that loaded nothing is the same failure wearing a different hat: the bot would
+    // decline everything and blame the documentation. Refuse to comment at all rather than post
+    // a confident "the docs do not cover this" from a bot that read no docs.
+    log(`halted: corpus is empty at ${opts.repoRoot} - refusing to answer from nothing`);
+    return { acted: false, reason: 'empty_corpus' };
+  }
+  log(`corpus: ${corpus.size} chunk(s) from ${opts.repoRoot}`);
+
+  const result = triage(issue, corpus);
   let comment = result.comment;
   let labels = [...result.labels];
 

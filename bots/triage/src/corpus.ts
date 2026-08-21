@@ -296,6 +296,13 @@ export class Corpus {
   private readonly df = new Map<string, number>();
   private avgLen = 0;
 
+  /**
+   * How many chunks loaded. Zero means the corpus read nothing, which is indistinguishable in its
+   * OUTPUT from a corpus that read everything and matched nothing - one says "the docs do not
+   * cover this", the other means "I have no docs". run.ts refuses to comment on zero (D-164).
+   */
+  get size(): number { return this.chunks.length; }
+
   constructor(repoRoot: string, files: readonly string[] = CORPUS_FILES, includeTranscripts = true) {
     for (const f of files) {
       let body: string;

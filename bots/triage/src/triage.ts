@@ -1,5 +1,5 @@
 import { AGENT_SIGNALS, ALLOWED_LABELS, FAILURE_MODES, type FailureMode, type Route } from './knowledge.js';
-import { assertAnswerIsSafe, botProseOnly, buildAnswer, type Answer } from './answer.js';
+import { assertAnswerIsSafe, botProseOnly, buildAnswer, decomposeQuestions, type Answer } from './answer.js';
 import type { Corpus } from './corpus.js';
 import { classifyIntent, type Intent } from './intent.js';
 
@@ -129,7 +129,23 @@ export function looksLikeQuestion(issue: Issue): boolean {
     || /\b(how do i|what does|is there a way|does this|can i|what happens if)\b/.test(h);
 }
 
-export function triage(issue: Issue, corpus?: Corpus): TriageResult {
+/**
+ * THE CORPUS IS REQUIRED, AND IT USED TO BE OPTIONAL.
+ *
+ * That single `?` put a wrong answer on the public repository. `run.ts` — the ONLY call site that
+ * runs in production — called `triage(issue)` and got a bot with no documents at all, so every
+ * real issue was answered "I could not find an answer to this in the published documents". It
+ * reported a retrieval failure as a documentation gap, which is worse than being wrong: it told
+ * the maintainer their docs were missing things that were sitting in the README.
+ *
+ * Every other call site — three eval sets and twenty-odd tests — passed a corpus explicitly. So
+ * the evals scored 20/20, 12/12 and 23/23 against a code path the bot does not take, and nothing
+ * anywhere could see it. An optional parameter is a default, and this one defaulted to "know
+ * nothing".
+ *
+ * Required now, so omitting it is a compile error rather than a silent decline.
+ */
+export function triage(issue: Issue, corpus: Corpus): TriageResult {
   // ---------------------------------------------------------------------------------------
   // INTENT FIRST. Everything below is downstream of it.
   //
@@ -148,7 +164,7 @@ export function triage(issue: Issue, corpus?: Corpus): TriageResult {
   // not what it will do; answering "any chance of windows support" from whatever scores highest
   // is how a bot invents a plan it has no standing to promise.
   let answer: Answer | undefined;
-  if (corpus && intent !== 'feature') {
+  if (intent !== 'feature') {
     const query = `${issue.title} ${issue.body}`.slice(0, 2000);
     // The intent is passed in rather than sniffed out of the text. Beginner questions rarely
     // carry a question mark, and `?`-sniffing is what let DECISIONS.md answer a pricing question.
@@ -157,7 +173,17 @@ export function triage(issue: Issue, corpus?: Corpus): TriageResult {
     // means one of them goes unanswered, and it will be the one the retriever was least sure
     // about - which is exactly the one that needed answering. On a single-question issue the
     // extra slot simply goes unused, because the floors still have to clear.
-    const a = buildAnswer(corpus, query, intent === 'question' ? 3 : 2, issue.title,
+    // ONE SLOT PER QUESTION ASKED, not a fixed three.
+    //
+    // Three was a guess that happened to fit the issues seen so far, and issue #14 asked FOUR
+    // things - free/paid, install, use, monitor. With a hard cap of three, one question loses no
+    // matter how good retrieval is, and the reader is told the documentation does not cover
+    // something it does cover. The cap now follows what was actually asked, floored at 3 so a
+    // single-question issue is unchanged and ceilinged at 5 so a wall of text cannot produce a
+    // wall of quotations.
+    const askedCount = intent === 'question' ? decomposeQuestions(query).length : 0;
+    const slots = intent === 'question' ? Math.min(5, Math.max(3, askedCount)) : 2;
+    const a = buildAnswer(corpus, query, slots, issue.title,
       intent === 'question');
     // For a question the retrieval result is the whole comment, so it is shown either way -
     // including when it declined, because "I could not find this" is the honest answer and

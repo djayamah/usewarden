@@ -60,8 +60,14 @@ MSG="$TMP/msg"
 cat > "$MSG" <<'COMMITMSG'
 usewarden 0.1.0
 
-A firewall for your AI coding agents. Watches every agent on the machine for
-drift, blocks out-of-scope actions, and shows you what it caught.
+Stop your AI coding agent before it touches something it shouldn't. A local
+guardrail for Claude Code, Cursor, Gemini CLI and more: it blocks out-of-scope
+writes, .env reads, rm -rf and force pushes, with no API key and zero tokens.
+
+It is not a firewall and not a sandbox. It intercepts what an agent DECLARES it
+is about to do, through that agent's own hook system, and does not sit in the
+kernel. An adversarial read of the earlier wording found that claim the first
+thing to attack and the first thing to lose (DECISIONS.md D-095).
 
 This is a single-commit history by design. The tool was built over eleven
 verified phases in a private repository whose commits contain the build
