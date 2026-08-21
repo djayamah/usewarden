@@ -1,29 +1,57 @@
 name: release
 
-# Publishes to npm using TRUSTED PUBLISHING (GitHub Actions OIDC).
+# ==============================================================================================
+# THIS WORKFLOW CANNOT PUBLISH. IT CAN ONLY STAGE.
+# ==============================================================================================
+#
+# It runs `npm stage publish`, which uploads the tarball to a staging queue where it is NOT
+# installable by anyone. A human then approves it from the Staged Packages screen on npmjs.com,
+# with a hardware security key. Until that happens, `npm install usewarden` cannot see it.
+#
+# WHY THIS RATHER THAN A DIRECT PUBLISH
+#
+# The previous version of this file ran `npm publish` behind the `release` deployment environment
+# and its required reviewer. That gate is real, but it lives entirely inside GitHub: whoever can
+# approve a deployment can release. ChainDrop (2026-08-04, 444 packages) did not steal a token -
+# its operators pushed to `main` and let the project's own release workflow sign the malware for
+# them. A control that an attacker inside GitHub can satisfy is not a control against an attacker
+# inside GitHub.
+#
+# Staged publishing moves the final authorisation to a DIFFERENT SYSTEM with a DIFFERENT
+# CREDENTIAL. Approval happens on npmjs.com and requires 2FA - a security key this repository has
+# no access to and CI cannot present. Both gates are kept: the environment reviewer decides
+# whether a build runs at all, and the staged approval decides whether the artifact goes live.
+#
+# The trusted publisher on npmjs.com is configured with `--allow-stage-publish` and NOT
+# `--allow-publish`, so even a workflow rewritten to call `npm publish` would be refused by the
+# registry. That is the second half of the control, and it is not in this file - see
+# ops/PUBLISH-TODAY.md step 6.
 #
 # There is NO NPM_TOKEN in this repository, in Actions secrets, or on any developer machine.
 # A token that does not exist cannot be stolen, which was the initial access in both Mini
-# Shai-Hulud incidents (TanStack 2026-05-11, @antv 2026-05-19) and in ChainDrop (2026-08-04).
+# Shai-Hulud incidents (TanStack 2026-05-11, @antv 2026-05-19).
 #
-# The `release` environment gate is the control that breaks ChainDrop's amplification step.
-# Its operators pushed straight to `main` and let the project's own release workflow sign the
-# malware for them. Here, `main` cannot be pushed to directly (ruleset, no bypass actors), and
-# this workflow cannot run without a separate, deliberate human approval.
+# WHICH REPOSITORY THIS MUST RUN IN
 #
-# Provenance is automatic under trusted publishing; `--provenance` is passed anyway as an
-# explicit statement of intent.
+# The PUBLIC one - github.com/djayamah/usewarden. npm has not generated provenance for packages
+# built in private source repositories since 2023-07-26, regardless of package visibility,
+# because npmjs.com verifies the linked commit and repository when a reader views the provenance
+# and cannot verify what it cannot see. Releasing from the private mirror would silently produce
+# an unprovenanced artifact.
 
 on:
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: "Run every check and pack the tarball, but do not publish"
-        type: boolean
-        default: true
+      mode:
+        description: "dry-run checks everything and packs nothing to the registry; stage uploads to the staging queue for manual approval"
+        type: choice
+        options:
+          - dry-run
+          - stage
+        default: dry-run
 
-# Minimum permissions. `id-token: write` is what lets Actions mint the OIDC token npm
-# exchanges for a short-lived credential. `contents: read` is needed to check out. Nothing else.
+# Minimum permissions. `id-token: write` is what lets Actions mint the OIDC token npm exchanges
+# for a short-lived credential. `contents: read` is needed to check out. Nothing else.
 permissions:
   id-token: write
   contents: read
@@ -36,6 +64,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     # The protected environment: a required human reviewer must approve before this job starts.
+    # This is now the FIRST of two gates, not the only one.
     environment: release
     timeout-minutes: 15
 
@@ -47,17 +76,36 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Node (LTS floor, matching package.json engines)
+      # 22.14.0, NOT 22.13.0. `engines.node` pins >=22.13.0 for CONSUMERS - that is where
+      # `node:sqlite` stopped requiring a flag. But npm documents Node >= 22.14.0 as the floor
+      # for trusted publishing AND for staged publishing, and this job depends on both. The
+      # previous pin of 22.13.0 sat one patch release under the floor of the feature the whole
+      # workflow is built on.
+      - name: Set up Node (the documented floor for trusted and staged publishing)
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22.13.0'
+          node-version: '22.14.0'
           registry-url: 'https://registry.npmjs.org'
 
-      # Trusted publishing needs a recent npm; 11.10.0 is also the min-release-age floor.
-      - name: Ensure npm supports trusted publishing
+      # Staged publishing needs npm >= 11.15.0. Asserted rather than assumed: if the floor is not
+      # met, the stage step would fail late, after the build and the tests, with an error about an
+      # unknown command - which reads as a broken workflow rather than as a missing floor.
+      - name: Ensure npm supports staged publishing
         run: |
           npm install -g npm@latest
-          npm --version
+          node -e '
+            const need = [11, 15, 0];
+            const v = require("child_process").execSync("npm --version").toString().trim();
+            const got = v.split(".").map(Number);
+            for (let i = 0; i < 3; i++) {
+              if (got[i] > need[i]) break;
+              if (got[i] < need[i]) {
+                console.error(`npm ${v} is below the 11.15.0 floor for staged publishing`);
+                process.exit(1);
+              }
+            }
+            console.log(`npm ${v} supports staged publishing`);
+          '
 
       - name: Install (lockfile exactly, no scripts)
         run: npm ci --ignore-scripts
@@ -74,12 +122,23 @@ jobs:
       - name: Pack and show exactly what would be published
         run: |
           npm pack --dry-run
-          echo "::notice::Read the file list above before approving a real publish."
+          echo "::notice::Read the file list above before approving the staged package."
 
-      - name: Publish to npm (trusted publishing, OIDC)
-        if: ${{ inputs.dry_run == false }}
-        run: npm publish --provenance --access public
+      # Provenance is generated automatically under trusted publishing and does not need the flag.
+      # It is passed anyway, as an explicit statement of intent and so that a reader of this file
+      # does not have to know that rule to know provenance is expected.
+      #
+      # NOTE the honest limitation: npm's documentation states that provenance is generated when
+      # publishing via trusted publishing, and documents `--provenance` as a flag of
+      # `npm stage publish`. It does not state in so many words that the attestation survives the
+      # stage -> approve transition. ops/PUBLISH-TODAY.md step 9 is a manual check of the
+      # provenance badge on npmjs.com after approval, precisely because that is unverified here.
+      - name: Stage for manual approval (this workflow never publishes)
+        if: ${{ inputs.mode == 'stage' }}
+        run: npm stage publish --provenance --access public
 
-      - name: Verify the published signatures
-        if: ${{ inputs.dry_run == false }}
-        run: npm audit signatures
+      - name: Show what is now waiting for a human
+        if: ${{ inputs.mode == 'stage' }}
+        run: |
+          npm stage list
+          echo "::notice::Nothing is installable yet. Approve it on npmjs.com under Staged Packages, with your security key."
