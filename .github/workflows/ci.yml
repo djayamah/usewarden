@@ -111,14 +111,33 @@ jobs:
         with:
           fetch-depth: 0   # the scan reads every blob in history, not the working tree
 
-      # Pattern pass only. It needs nothing but python3, which is why it can run here.
+      # TWO GATES, because there are two different risks with two different fixes.
       #
-      # The gitleaks half deliberately does NOT run in CI: pulling a third-party scanner binary
-      # into a workflow is exactly the supply-chain surface this repository pins action SHAs to
-      # avoid. gitleaks runs locally, in the pre-push gate, where a human sees the output —
-      # `./scripts/pre-public-scan.sh`. A run with it skipped prints "NOT the publication gate"
-      # on its last line and this job does not pretend otherwise.
-      - name: Pattern scan over every blob in history
+      # 1. A CREDENTIAL must not exist anywhere, in any repository, public or private — finding
+      #    one means revoking it. Checked over the working tree, with no exemptions.
+      #
+      # 2. IDENTITY — absolute paths, hostnames, private project names — is expected in a private
+      #    tree that documents a real machine, and is removed at publication by
+      #    scripts/sanitise-for-publication.sh. The gate for it is therefore what publication
+      #    would actually push: sanitise a throwaway clone, build the publication tree, and scan
+      #    THAT ref at full strictness. scripts/publish-rehearsal.sh does exactly that.
+      #
+      # What this job used to do was scan this repository's entire private history and refuse to
+      # pass. Publication does not push that history (DECISIONS.md D-051 — a single orphan commit
+      # is published instead, precisely so the old blobs are never fetchable), so the job gated on
+      # a question publication never asks and could never go green. A blocking gate that can never
+      # go green gets ignored, and an ignored gate is worse than no gate.
+      #
+      # gitleaks runs inside the rehearsal, over the publication ref, and it is a local binary
+      # only when present — the rehearsal reports honestly when it is absent.
+      - name: No credential anywhere in the working tree
+        run: ./scripts/pre-public-scan.sh --scope=tree --classes=credentials
+
+      - name: Publication rehearsal — scan what publication would actually push
         env:
+          # gitleaks is deliberately NOT installed here: pulling a third-party scanner binary into
+          # a workflow is exactly the supply-chain surface this repository pins action SHAs to
+          # avoid. The rehearsal says so on its last line rather than reporting a full pass it did
+          # not run; the gate that authorises a visibility change is the local one.
           SCAN_SKIP_GITLEAKS: '1'
-        run: ./scripts/pre-public-scan.sh
+        run: ./scripts/publish-rehearsal.sh
