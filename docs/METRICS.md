@@ -9,12 +9,6 @@ for the same thing with every constant included so you can recompute it yourself
 
 ## 0. How do I monitor what usewarden has caught, and see its impact?
 
-*This section exists because it was missing, and the absence was found the hard way: a user asked
-how to "monitor the impact" and the triage bot correctly reported that nothing matched — the words
-`monitor`, `monitoring`, `impact`, `track` and `caught` appeared **zero** times in this file. The
-rest of this document is written in the vocabulary of the person who built the counters; this part
-is written in the words people actually ask in.*
-
 **Three commands for tracking what usewarden has caught and what impact it has had:**
 
 ```bash
@@ -34,6 +28,12 @@ Read §4.6 before quoting any of it. Guardian overhead is shown beside the savin
 off them.
 
 Nothing here leaves your machine; monitoring usewarden means reading your own local database (§8).
+
+*This section exists because it was missing, and the absence was found the hard way: a user asked
+how to "monitor the impact" and the triage bot correctly reported that nothing matched — the words
+`monitor`, `monitoring`, `impact`, `track` and `caught` appeared **zero** times in this file. The
+rest of this document is written in the vocabulary of the person who built the counters; this part
+is written in the words people actually ask in.*
 
 ## 1. The rule
 

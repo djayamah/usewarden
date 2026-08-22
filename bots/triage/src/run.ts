@@ -3,6 +3,11 @@ import * as path from 'node:path';
 import { assertCommentIsSafe, triage, type Issue } from './triage.js';
 import { ALLOWED_LABELS } from './knowledge.js';
 import { Corpus } from './corpus.js';
+import {
+  shouldReply, explainRefusal, BOT_DISCLOSURE_MARKER,
+  type ConversationContext, type ReplyRefusal,
+} from './conversation.js';
+import { DEFAULT_SURFACES, type Surface } from './surface.js';
 
 /**
  * The GitHub Actions entrypoint.
@@ -45,11 +50,32 @@ export interface RunOptions {
   log?: (s: string) => void;
   /** Optional model classifier for issues the deterministic pass could not match. */
   classify?: (issue: Issue) => Promise<{ labels: string[]; note: string } | null>;
+
+  /**
+   * The event that woke the bot. OMITTED means `issues: opened` — the only trigger that existed
+   * before the conversation surface, so every existing caller and test keeps its exact behaviour.
+   */
+  event?: {
+    surface: Surface;
+    /**
+     * Who wrote the thing being replied to. OMIT on the `issue` surface - there is no comment, so
+     * it defaults to the issue author. An EMPTY STRING is not the same as omitted: it means "the
+     * API did not name them", and the conversation guard refuses it rather than falling back.
+     */
+    triggeredBy?: string;
+    triggeredByIsBot: boolean;
+  };
+  /** Parsed `TRIAGE_BOT_SURFACES`. Omitted means the default: issues only. */
+  enabledSurfaces?: readonly Surface[];
+  /** Logins the bot must never answer. Omitted means none — the caller supplies the maintainers. */
+  maintainers?: readonly string[];
 }
 
 export type RunOutcome =
   | { acted: false; reason: 'kill_switch_file' | 'kill_switch_variable' | 'already_commented'
-      | 'daily_cap' | 'bot_author' | 'issue_closed' | 'empty_corpus' }
+      | 'daily_cap' | 'bot_author' | 'issue_closed' | 'empty_corpus' | 'surface_not_enabled' }
+  /** The conversation guard refused. `refusal` is `shouldReply()`'s own reason, carried through. */
+  | { acted: false; reason: 'conversation_guard'; refusal: ReplyRefusal }
   | { acted: true; route: string; labels: string[] };
 
 export async function run(opts: RunOptions): Promise<RunOutcome> {
@@ -65,23 +91,63 @@ export async function run(opts: RunOptions): Promise<RunOutcome> {
     return { acted: false, reason: 'kill_switch_variable' };
   }
 
+  // 1b. IS THIS SURFACE TURNED ON? Separate from the kill switch on purpose — see surface.ts.
+  //     A merge must not widen a live bot's reach; only setting the variable does that.
+  const surface: Surface = opts.event?.surface ?? 'issue';
+  const enabled = opts.enabledSurfaces ?? DEFAULT_SURFACES;
+  if (!enabled.includes(surface)) {
+    log(`halted: surface ${surface} is not in TRIAGE_BOT_SURFACES (${enabled.join(',')})`);
+    return { acted: false, reason: 'surface_not_enabled' };
+  }
+
   const issue = await opts.api.getIssue(opts.issueNumber);
 
-  // 4. SELF / bot-authored, and closed issues.
-  if (/\[bot\]$/.test(issue.user) || issue.user === 'github-actions') {
-    log('halted: issue was opened by a bot');
-    return { acted: false, reason: 'bot_author' };
-  }
+  // Whoever wrote the thing being replied to. On `issues: opened` that is the issue author; on a
+  // comment surface it is the commenter, and using the issue author there would let anyone reopen
+  // the bot on a thread by commenting under someone else's issue.
+  // `??` and never `||`: an explicit empty string means "unnamed author" and must reach the guard.
+  const triggeredBy = opts.event?.triggeredBy ?? issue.user;
+  const triggeredByIsBot = opts.event?.triggeredByIsBot
+    ?? (/\[bot\]$/.test(issue.user) || issue.user === 'github-actions');
+
   if (issue.state !== 'open') {
     log('halted: issue is not open');
     return { acted: false, reason: 'issue_closed' };
   }
 
-  // 2. ALREADY SEEN — one comment per issue, ever. A bot that comments twice is noise.
   const comments = await opts.api.listIssueComments(opts.issueNumber);
-  if (comments.some((c) => c.isBot && c.body.includes('Automated triage'))) {
+
+  // 2. ALREADY SEEN — one comment per issue, ever.
+  //
+  //    THIS APPLIES TO `issues: opened` ONLY, and the distinction is deliberate rather than an
+  //    oversight. On a brand-new issue the bot gets exactly one turn: it has one thing to say and
+  //    saying it twice is noise. On a conversation surface that same rule would mean a thread the
+  //    bot ever touched is dead to it forever, so the FIRST person to ask silences the bot for
+  //    everyone else on the thread — the opposite failure, and just as bad. There, rule 2 of the
+  //    conversation guard governs instead: never twice to the SAME PERSON, which is the rule the
+  //    founder actually set and which `shouldReply()` proves.
+  if (surface === 'issue' && comments.some((c) => c.isBot && c.body.includes(BOT_DISCLOSURE_MARKER))) {
     log('halted: already commented on this issue');
     return { acted: false, reason: 'already_commented' };
+  }
+
+  // 4. THE CONVERSATION GUARD — self-reply, repeat-reply, maintainer, and bot-monologue loops.
+  //    A pure function over the thread snapshot; every rule fails closed. See conversation.ts.
+  const ctx: ConversationContext = {
+    surface,
+    triggeredBy,
+    triggeredByIsBot,
+    comments: comments.map((c) => ({ author: c.user, isBot: c.isBot, body: c.body })),
+    maintainers: opts.maintainers ?? [],
+    closed: issue.state !== 'open',
+  };
+  const decision = shouldReply(ctx);
+  if (!decision.reply) {
+    log(`halted: ${explainRefusal(decision.reason)}`);
+    // `bot_author` is kept as its own outcome because callers and tests already read it, and
+    // "the author is a bot" is the one refusal that was reportable before this guard existed.
+    if (decision.reason === 'author_is_bot') return { acted: false, reason: 'bot_author' };
+    return { acted: false, reason: 'conversation_guard', refusal: decision.reason };
   }
 
   // 3. DAILY CAP — a broken trigger or an issue import must not turn into thirty notifications.

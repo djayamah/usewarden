@@ -52,6 +52,14 @@ Node ≥ 22.13. Zero runtime dependencies. No install scripts. MIT.
 
 ## FAQ
 
+**How do I install it?**
+Clone it and build it — see [Quickstart](#quickstart) just above for the four commands. There is
+nothing to sign up for and no install script: `usewarden init` detects which agents you have,
+shows you a diff of what it is about to change, and registers the hooks only when you agree.
+`usewarden status` then tells you whether it is actually running, which is the question that
+matters most. It is **not installable from npm yet** — the registry entry is a placeholder — so
+installing from source is currently the only way.
+
 **Is it free?**
 Yes. usewarden is free and open source under the MIT licence, and there is no paid tier, no
 account, and nothing to sign up for. The blocking — Layer 1 — costs nothing to run: it is
@@ -539,7 +547,7 @@ Node **≥ 22.13.0** (Node 22 *Jod* and 24 *Krypton* are the Active LTS lines; 2
 ```bash
 npm install
 npm run build
-npm test                          # 316 tests, no network, no API keys required
+npm test                          # 383 tests, no network, no API keys required
 ./scripts/verify-all.sh           # every gate: build, both Node lines, fixtures, screenshots, CLI smoke
 ./scripts/make-fixture.sh         # build the sabotage fixture
 ./scripts/screenshot-synthetic.sh # re-render the published screenshots

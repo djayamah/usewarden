@@ -196,8 +196,12 @@ export function triage(issue: Issue, corpus: Corpus): TriageResult {
   const route: Route =
       intent === 'security' ? 'security'
     : security.length > 0 ? 'security'
-    : intent === 'feature' ? 'unmatched'
-    : intent === 'question' ? (answered ? 'likely-known' : 'unmatched')
+    // THE THREE STATES THAT USED TO SHARE ONE NAME. See the Route doc comment for why this
+    // matters more than it looks: a question the docs cannot answer is a documentation defect
+    // with an owner and a fix, and it was previously indistinguishable in the queue from a bug
+    // report nobody could parse.
+    : intent === 'feature' ? 'feature'
+    : intent === 'question' ? (answered ? 'likely-known' : 'docs-gap')
     : matches.length === 0 ? 'unmatched'
     : !hasEnv ? 'needs-info'
     : (matches.find((m) => m.route === 'possible-regression') ? 'possible-regression' : 'likely-known');
@@ -210,7 +214,11 @@ export function triage(issue: Issue, corpus: Corpus): TriageResult {
     ...(intent === 'security' ? ['security'] : []),
     // `unmatched` means "a human needs to read this properly". A question that got a quoted
     // answer is not unmatched, and labelling it so is noise on top of a correct answer.
-    ...(intent === 'question' && !answered ? ['unmatched'] : []),
+    //
+    // A question that got NO answer is not unmatched either — it is a documentation gap, which is
+    // a different job for a different person, and `docs-gap` says so. `enhancement` already
+    // carries the feature case, so a feature request no longer takes `unmatched` as well.
+    ...(intent === 'question' && !answered ? ['docs-gap'] : []),
     ...(intent === 'bug' && matches.length === 0 ? ['unmatched'] : []),
     ...(intent === 'bug' && matches.length > 0 && !hasEnv ? ['needs-info'] : []),
   ])].filter((l) => ALLOWED_LABELS.includes(l)).sort();
