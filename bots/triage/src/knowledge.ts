@@ -16,7 +16,26 @@
  *   - `ask` is what the reporter should run. It is never more than two commands.
  */
 
-export type Route = 'needs-info' | 'likely-known' | 'possible-regression' | 'security' | 'unmatched';
+/**
+ * Where an issue lands in the maintainer's queue.
+ *
+ * `unmatched` used to mean three unrelated things at once — a feature request, a question the
+ * documents do not answer, and a bug report matching no known failure mode — which made the label
+ * useless for the one job a triage label has: telling the maintainer what kind of work an issue
+ * is. Issue #14 was labelled `question, unmatched` when what it had actually found was a
+ * documentation gap, and nothing in the queue said so. The three are now distinct:
+ *
+ *   - `docs-gap`  a question the corpus could not answer. This is a DEFECT IN THE DOCUMENTATION
+ *                  and it is actionable: write the missing section and the bot answers it next
+ *                  time. It is not a judgement about the asker.
+ *   - `feature`   a request for something usewarden does not do. Nothing to retrieve, nothing
+ *                  missing from the docs; it is a roadmap decision.
+ *   - `unmatched` a bug report matching no failure mode the project has recorded. A human has to
+ *                  read this one properly, and it is the only one of the three that means that.
+ */
+export type Route =
+  | 'needs-info' | 'likely-known' | 'possible-regression' | 'security'
+  | 'docs-gap' | 'feature' | 'unmatched';
 
 export interface FailureMode {
   /** Stable id, used in labels and tests. */
@@ -181,7 +200,7 @@ export const FAILURE_MODES: FailureMode[] = [
 export const ALLOWED_LABELS: string[] = [
   ...new Set([
     'bug', 'security', 'question', 'documentation', 'enhancement',
-    'priority:high', 'needs-info', 'unmatched',
+    'priority:high', 'needs-info', 'unmatched', 'docs-gap',
     'agent:claude', 'agent:cursor', 'agent:gemini', 'agent:copilot', 'agent:codex', 'agent:opencode',
     ...FAILURE_MODES.flatMap((m) => m.labels),
   ]),

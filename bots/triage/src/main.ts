@@ -1,8 +1,11 @@
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { run, type GitHubApi } from './run.js';
 import { buildPrompt, parseClassification, selectBotProvider } from './classify.js';
 import type { Issue } from './triage.js';
+import { parseSurfaces, surfaceFromEvent } from './surface.js';
+import { discussionApi, makeGraphQLClient } from './discussions.js';
 
 /**
  * Thin GitHub Actions wrapper. All decisions live in `triage.ts` and `run.ts`, which are pure and
@@ -73,6 +76,39 @@ async function makeClassifier(): Promise<((issue: Issue) => Promise<{ labels: st
   };
 }
 
+/**
+ * Read the Actions event payload for the two facts the conversation guard needs and the workflow
+ * cannot pass as a scalar: WHO triggered this, and whether an `issue_comment` is really a PR.
+ *
+ * Missing or unreadable payload is not an error — it means `issues: opened`, where the triggering
+ * author is the issue author and `run.ts` derives it. Anything this cannot read stays undefined so
+ * the caller falls back rather than guessing.
+ */
+function readEventPayload(): { actor?: string; actorIsBot?: boolean; isPullRequest: boolean } {
+  const p = process.env['GITHUB_EVENT_PATH'];
+  if (!p || !fs.existsSync(p)) return { isPullRequest: false };
+  try {
+    const e = JSON.parse(fs.readFileSync(p, 'utf8')) as {
+      comment?: { user?: { login?: string; type?: string } };
+      discussion?: { user?: { login?: string; type?: string } };
+      issue?: { pull_request?: unknown };
+    };
+    // On a comment event the author of the COMMENT is who we would be replying to. On a discussion
+    // opened event there is no comment, so it is the discussion's author.
+    const u = e.comment?.user ?? e.discussion?.user;
+    const login = u?.login;
+    return {
+      ...(login ? { actor: login } : {}),
+      ...(u ? { actorIsBot: u.type === 'Bot' || /\[bot\]$/.test(login ?? '') } : {}),
+      isPullRequest: e.issue?.pull_request != null,
+    };
+  } catch {
+    // A payload we cannot parse tells us nothing. Returning "not a PR, no actor" makes the caller
+    // fall back to the issue author, and the conversation guard refuses an empty author anyway.
+    return { isPullRequest: false };
+  }
+}
+
 async function main(): Promise<number> {
   const token = process.env['GITHUB_TOKEN'];
   const repo = process.env['GITHUB_REPOSITORY'];
@@ -82,13 +118,50 @@ async function main(): Promise<number> {
     return 2;
   }
 
+  const log = (s: string): void => { process.stdout.write(`triage: ${s}\n`); };
+
+  // WHICH SURFACE. An event this has no mapping for is not one to improvise on.
+  const payload = readEventPayload();
+  const eventName = process.env['GITHUB_EVENT_NAME'] ?? 'issues';
+  const surface = surfaceFromEvent(eventName, payload.isPullRequest);
+  if (!surface) {
+    log(`no surface for event ${eventName} - nothing to do`);
+    return 0;
+  }
+
+  const { surfaces, unknown } = parseSurfaces(process.env['TRIAGE_BOT_SURFACES']);
+  // A misconfigured surface name is reported loudly. Silently ignoring it is how someone believes
+  // they enabled something they did not.
+  if (unknown.length > 0) log(`ignoring unknown surface name(s) in TRIAGE_BOT_SURFACES: ${unknown.join(', ')}`);
+
+  const maintainers = (process.env['TRIAGE_BOT_MAINTAINERS'] ?? '')
+    .split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+
+  const rest = gh(token, repo);
+  const onDiscussion = surface === 'discussion' || surface === 'discussion_comment';
+  const api = onDiscussion
+    ? discussionApi(makeGraphQLClient(token), repo, rest.countRecentBotComments.bind(rest), log)
+    : rest;
+
   const classify = await makeClassifier();
   const outcome = await run({
     repoRoot: REPO_ROOT,
     issueNumber,
-    api: gh(token, repo),
+    api,
     enabledVar: process.env['TRIAGE_BOT_ENABLED'],
-    log: (s) => process.stdout.write(`triage: ${s}\n`),
+    enabledSurfaces: surfaces,
+    maintainers,
+    event: {
+      surface,
+      // OMITTED on `issues: opened` so run.ts uses the issue author - there is no comment to have
+      // an author. On every OTHER surface the commenter is who we would be replying to, and an
+      // actor we could not read is passed through as empty ON PURPOSE: the conversation guard
+      // refuses an unnamed author, and falling back to the issue author there would let a comment
+      // be judged against the wrong person's history on the thread.
+      ...(surface === 'issue' ? {} : { triggeredBy: payload.actor ?? '' }),
+      triggeredByIsBot: payload.actorIsBot ?? false,
+    },
+    log,
     ...(classify ? { classify } : {}),
   });
 

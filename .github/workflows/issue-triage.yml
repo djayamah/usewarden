@@ -8,27 +8,59 @@ name: Issue triage
 #
 # The variable is also the ON switch: the bot does nothing until someone sets it deliberately, so
 # merging this workflow does not start it.
+#
+# A SECOND SWITCH GOVERNS THE WIDER SURFACE — `TRIAGE_BOT_SURFACES`, default `issue`.
+#
+# The triggers below fire on comments and discussions, but the bot answers only on the surfaces
+# that variable names, and unset means `issue` alone: exactly what it did before. That separation
+# is the point. `TRIAGE_BOT_ENABLED` is already set on this repository, so if the triggers alone
+# decided reach, merging this file would silently turn a bot that comments once on new issues into
+# one that joins every conversation. A merge is not a decision to widen a bot's reach, so widening
+# takes its own deliberate act:
+#
+#   gh variable set TRIAGE_BOT_SURFACES --repo djayamah/usewarden \
+#     --body 'issue,issue_comment,discussion,discussion_comment'
+#
+# Recognised names: issue, issue_comment, discussion, discussion_comment, pr_comment. There is no
+# `all` — a wildcard is how a surface nobody evaluated gets enabled by a value typed once.
 
 on:
   issues:
     types: [opened]
+  issue_comment:
+    types: [created]
+  discussion:
+    types: [created]
+  discussion_comment:
+    types: [created]
 
 # Least privilege, per GitHub's own guidance. `issues: write` is the minimum that can comment and
 # label; nothing here can push, read secrets beyond what is passed, or touch a pull request.
 permissions:
   contents: read
   issues: write
+  # Discussions live only in the GraphQL API and need their own scope. Read access alone cannot
+  # post, so this is the minimum for the discussion surfaces; it grants nothing over issues, code,
+  # or pull requests that is not already granted above.
+  discussions: write
 
+# One thread at a time, whichever surface it came from. Two runs answering the same thread
+# concurrently would each see a snapshot without the other's comment - which is the exact race the
+# "never the third consecutive bot comment" rule cannot catch, because at decision time neither
+# comment exists yet. Serialising per thread is what makes that guard sound.
 concurrency:
-  group: issue-triage-${{ github.event.issue.number }}
+  group: issue-triage-${{ github.event.issue.number || github.event.discussion.number }}
   cancel-in-progress: false
 
 jobs:
   triage:
-    # Cheap pre-checks before a runner does any work. The real kill-switch checks are in the bot
-    # itself, because a condition here that silently evaluates false is indistinguishable from a
-    # bot that ran and decided to say nothing.
-    if: github.event.issue.pull_request == null
+    # Cheap pre-checks before a runner does any work. The real kill-switch and conversation checks
+    # are in the bot itself, because a condition here that silently evaluates false is
+    # indistinguishable from a bot that ran and decided to say nothing. The only thing filtered
+    # here is a bot-authored trigger, and only because starting a runner to decide not to reply to
+    # ourselves is pure waste - `shouldReply()` refuses it again regardless, and the test suite
+    # proves that rather than trusting this line.
+    if: github.event.comment.user.type != 'Bot' && github.event.sender.type != 'Bot'
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -52,8 +84,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          # An issue, a PR (which GitHub models as an issue), or a discussion.
+          ISSUE_NUMBER: ${{ github.event.issue.number || github.event.discussion.number }}
           TRIAGE_BOT_ENABLED: ${{ vars.TRIAGE_BOT_ENABLED }}
+          # Unset means `issue` only - see the header. Not a secret; a variable, so it is visible.
+          TRIAGE_BOT_SURFACES: ${{ vars.TRIAGE_BOT_SURFACES }}
+          # Logins the bot must never answer. The maintainer talking on their own repository does
+          # not need their own bot replying to them.
+          TRIAGE_BOT_MAINTAINERS: ${{ vars.TRIAGE_BOT_MAINTAINERS || github.repository_owner }}
+          # The event payload, for WHO triggered this and whether a comment is really on a PR.
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
           # Optional. Absent by default, in which case the bot is entirely deterministic and free.
           USEWARDEN_BOT_GEMINI_KEY: ${{ secrets.USEWARDEN_BOT_GEMINI_KEY }}
           USEWARDEN_BOT_OPENAI_KEY: ${{ secrets.USEWARDEN_BOT_OPENAI_KEY }}
