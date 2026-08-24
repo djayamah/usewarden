@@ -21,6 +21,16 @@ export interface CommandRule {
   action: 'block' | 'warn';
   /** When true the rule only fires if the command's target is outside allowed_paths. */
   outsideRepoOnly?: boolean;
+  /**
+   * When true the rule only fires if the command targets a protected branch.
+   *
+   * This used to be a hardcoded `rule.id === 'force-push-protected'` check inside the engine,
+   * which meant the refinement existed but the POLICY could not ask for it — so a second rule
+   * needing it could not have it, and a user writing their own rule could never reach it. Found
+   * while adding exactly such a rule. A refinement the engine keeps to itself is a refinement
+   * the policy language does not have.
+   */
+  protectedBranchOnly?: boolean;
 }
 
 export interface Policy {
@@ -28,13 +38,33 @@ export interface Policy {
   scope: {
     allowed_paths: string[];
     forbidden_paths: string[];
+    /**
+     * Refuse a whole-file overwrite of something git cannot restore — an untracked file, or one
+     * with uncommitted changes — when this session did not write it itself.
+     *
+     * On by default. It exists because `allowed_paths` says every write inside the repository is
+     * fine, and the documented anthropics/claude-code#53900 incident destroyed a file that was
+     * inside the repository. See docs/GIT-AWARENESS.md for exactly what it can and cannot see.
+     */
+    protect_uncommitted: boolean;
   };
   commands: {
     deny: CommandRule[];
   };
   invariants: string[];
   session: { goal_required: boolean };
-  context: { warn_pct: number };
+  /**
+   * `warn_pct` is **null by default and that is deliberate**, not an oversight.
+   *
+   * The rule reads `NormalizedEvent.contextFill`, which no adapter populates — no agent reports
+   * context-window usage to a hook. It shipped enabled at 60 for months, printed in
+   * `usewarden policy`, and could never fire. A rule a user can read in their own policy but
+   * which cannot fire is a protection they believe they have and do not (D-224, D-225).
+   *
+   * Setting it opts in to a rule that is documented as not-yet-implemented; usewarden says so
+   * rather than pretending. See src/policy/inputs.ts.
+   */
+  context: { warn_pct: number | null };
   checkpoint: { auto: boolean };
   protected_branches: string[];
   judge: {
@@ -71,6 +101,7 @@ export function defaultCommandDeny(): CommandRule[] {
       pattern: String.raw`\bgit\s+push\b[^\n]*\s(--force\b|--force-with-lease\b|-f\b)`,
       reason: 'Force-push to a protected branch rewrites shared history. Push to a feature branch and open a PR.',
       action: 'block',
+      protectedBranchOnly: true,
     },
     {
       id: 'git-reset-hard',
@@ -98,7 +129,10 @@ export function defaultCommandDeny(): CommandRule[] {
     },
     {
       id: 'dotenv-access',
-      pattern: String.raw`(^|[\s;&|"'=])(cat|less|more|head|tail|bat|strings|xxd|od|cp|mv|scp|rsync|source|\.)\s+[^\s;&|]*\.env(\.[A-Za-z0-9_-]+)?\b`,
+      // The negative lookahead exempts the `.env.example` family. Usewarden's own block message
+      // tells the agent to use .env.example instead, and a guardian that blocks the alternative
+      // it just recommended is the documented over-guard trap (spec 3A.6).
+      pattern: String.raw`(^|[\s;&|"'=])(cat|less|more|head|tail|bat|strings|xxd|od|cp|mv|scp|rsync|source|\.)\s+[^\s;&|]*\.env(?!\.(?:example|sample|template|dist|defaults?)\b)(\.[A-Za-z0-9_-]+)?\b`,
       reason: 'Reading or copying a .env file exposes credentials to the model context. Usewarden blocks all .env access.',
       action: 'block',
     },
@@ -120,6 +154,81 @@ export function defaultCommandDeny(): CommandRule[] {
       reason: 'Publishing to a registry is an outward-facing, irreversible action. A human runs this.',
       action: 'block',
     },
+
+    // ---------------------------------------------------------------------------------------
+    // ADDED FROM A COVERAGE RUN AGAINST DOCUMENTED PUBLIC INCIDENTS, 2026-08-24.
+    //
+    // The eleven rules above caught 19 of 35 real cases. Every rule below closes a specific miss,
+    // and the reason each is `block` rather than `warn` is the same in every case: blocking costs
+    // the human one command to run themselves, and the failure it prevents is unrecoverable.
+    // Where recovery IS possible the action is `warn` instead, and that difference is deliberate.
+    // ---------------------------------------------------------------------------------------
+    {
+      id: 'git-clean-force',
+      // `-fd` wipes untracked files; adding `-x` wipes ignored ones too, which is where .env,
+      // local databases and build caches live. Nothing in git recovers any of it.
+      pattern: String.raw`\bgit\s+clean\b[^\n]*\s-[A-Za-z]*f`,
+      reason: 'git clean -f permanently deletes untracked files — .env files, local databases and anything not yet committed. Nothing in git can recover them. Commit or stash first, or run it yourself.',
+      action: 'block',
+    },
+    {
+      id: 'dd-to-device',
+      pattern: String.raw`\bdd\b[^\n]*\sof=/dev/(?!null\b|stdout\b|stderr\b)`,
+      reason: 'Writing to a raw device destroys a disk or partition. There is no version of this an agent should run.',
+      action: 'block',
+    },
+    {
+      id: 'mv-to-devnull',
+      pattern: String.raw`\bmv\s+[^\n]*\s/dev/null\b`,
+      reason: 'Moving a path to /dev/null deletes it. If deletion is intended, say so; if not, this is a mistake.',
+      action: 'block',
+    },
+    {
+      id: 'find-delete',
+      // `find . -name '*.tmp' -delete` inside a project is ordinary housekeeping and must not fire.
+      //
+      // The obvious implementation — this rule plus `outsideRepoOnly` — DOES fire on it, and the
+      // reason is worth recording because it is not this rule's fault.
+      // `commandTargetsOnlyAllowedPaths` cannot tell a path argument from an OPTION VALUE, so it
+      // reads `'*.tmp'` (the value of `-name`) as a path, fails to resolve it, and fails closed.
+      // Fixing that generally is not safe in the obvious way either: skipping tokens that contain
+      // glob characters would also stop `rm -rf '~/*'` being judged as leaving the repo.
+      //
+      // So this rule does not depend on path resolution at all. It fires only when find is given
+      // an ABSOLUTE, home-relative or parent-relative starting point, which is exactly the shape
+      // of the dangerous case and cannot be the shape of in-repo housekeeping. `find ../x -delete`
+      // is caught; a relative path deeper inside the repo is not, and that is the intended trade.
+      pattern: String.raw`\bfind\s+(-[A-Za-z]+\s+)*(~|/|\.\./)[^\n]*\s(-delete\b|-exec\s+rm\b)`,
+      reason: 'A bulk delete rooted outside this repository. Narrow it to a path inside the repo, or run it yourself.',
+      action: 'block',
+    },
+    {
+      id: 'infra-destroy',
+      // `kubectl delete pod` is routine and self-healing, so it is deliberately absent. The
+      // resources named here do not come back.
+      pattern: String.raw`\bterraform\s+destroy\b|\bkubectl\s+delete\s+(namespace|ns|deployment|statefulset|pvc|persistentvolumeclaim|secret)\b|\bhelm\s+(delete|uninstall)\b`,
+      reason: 'Destroying infrastructure or a namespace is not reversible from the agent side, and a production target looks identical to a sandbox one from here. A human runs this.',
+      action: 'block',
+    },
+    {
+      id: 'push-protected-nonforce',
+      // Force-push to a protected branch is already blocked above. This is the ordinary push,
+      // which is recoverable — hence `warn`. It is here because branch protection is a server-side
+      // setting a local agent cannot see, so on a repo without it this is the whole safety net.
+      pattern: String.raw`\bgit\s+push\b(?![^\n]*\s(--force|--force-with-lease|-f)\b)`,
+      reason: 'Pushing straight to a protected branch skips review. Push a feature branch and open a PR instead.',
+      action: 'warn',
+      protectedBranchOnly: true,
+    },
+    {
+      id: 'discard-working-tree',
+      // `warn`, not `block`: reverting its own edits is a legitimate and common agent move, and
+      // blocking it would fire constantly. The warning exists because the same command also
+      // discards the HUMAN's uncommitted edits, which the agent cannot see.
+      pattern: String.raw`\bgit\s+(checkout|restore)\s+(--\s+)?\.(\s|$)|\bgit\s+stash\s+(clear|drop)\b`,
+      reason: 'This discards uncommitted changes in the working tree, including any the human made that the agent cannot see.',
+      action: 'warn',
+    },
   ];
 }
 
@@ -128,23 +237,51 @@ export function defaultPolicy(repoRoot: string): Policy {
     version: 1,
     scope: {
       allowed_paths: [repoRoot],
+      // MEASURED AGAINST REAL INCIDENTS, NOT CHOSEN BY TASTE.
+      //
+      // The first version of this list was written by us for us, and a coverage run against
+      // documented public agent failures put it at 54%. The additions below are the credential
+      // stores that run actually missed. Each one is a file a real agent has been reported reading
+      // or a token store whose theft has a named incident behind it:
+      //
+      //   ~/.npmrc      an npm publish token. This is the initial access in both Mini Shai-Hulud
+      //                 incidents this project's own release workflow is hardened against, and it
+      //                 was not on the list while the workflow header cited them.
+      //   ~/.netrc      plaintext host credentials, still read by curl and git by default.
+      //   ~/.docker     registry credentials, and often a cloud provider token alongside them.
+      //   ~/.kube       cluster admin credentials. The PocketOS-class incident is a production
+      //                 delete; this is the file that authorises one.
+      //   ~/.config/gcloud, ~/.azure  the same for the other two majors.
+      //
+      // NOT added, deliberately: `**/.npmrc`. A project-level .npmrc usually holds only registry
+      // configuration and an agent reading it is ordinarily fine, so a blanket block there buys
+      // little and spends trust — see the false-positive section of the FAQ.
       forbidden_paths: [
         '~/.ssh',
         '~/.aws',
         '~/.gnupg',
         '~/.config/gh',
         '~/Library/Keychains',
+        '~/.npmrc',
+        '~/.netrc',
+        '~/.docker',
+        '~/.kube',
+        '~/.config/gcloud',
+        '~/.azure',
         '**/.env',
         '**/.env.*',
         '**/id_rsa',
         '**/id_ed25519',
+        '**/id_ecdsa',
         '**/*.pem',
+        '**/*.p12',
       ],
+      protect_uncommitted: true,
     },
     commands: { deny: defaultCommandDeny() },
     invariants: [],
     session: { goal_required: false },
-    context: { warn_pct: 60 },
+    context: { warn_pct: null },
     checkpoint: { auto: true },
     protected_branches: ['main', 'master', 'release', 'production'],
     judge: { enabled: true, every_n_events: 15, max_calls_per_session: 8, model: null },
@@ -218,9 +355,10 @@ export function validatePolicy(doc: YamlValue, base: Policy): Policy {
   if (doc['scope'] !== undefined && doc['scope'] !== null) {
     const s = doc['scope'];
     if (!isObj(s)) throw new PolicyError('expected a mapping', 'scope');
-    rejectUnknown(s, ['allowed_paths', 'forbidden_paths'], 'scope');
+    rejectUnknown(s, ['allowed_paths', 'forbidden_paths', 'protect_uncommitted'], 'scope');
     if (s['allowed_paths'] !== undefined) out.scope.allowed_paths = strArray(s['allowed_paths'], 'scope.allowed_paths');
     if (s['forbidden_paths'] !== undefined) out.scope.forbidden_paths = strArray(s['forbidden_paths'], 'scope.forbidden_paths');
+    out.scope.protect_uncommitted = bool(s['protect_uncommitted'] ?? null, 'scope.protect_uncommitted', out.scope.protect_uncommitted);
   }
 
   if (doc['commands'] !== undefined && doc['commands'] !== null) {
@@ -247,7 +385,12 @@ export function validatePolicy(doc: YamlValue, base: Policy): Policy {
     const c = doc['context'];
     if (!isObj(c)) throw new PolicyError('expected a mapping', 'context');
     rejectUnknown(c, ['warn_pct'], 'context');
-    out.context.warn_pct = int(c['warn_pct'] ?? null, 'context.warn_pct', out.context.warn_pct, 1, 99);
+    // An explicit null switches it off again; anything else is validated as before. The default
+    // is null, so `int(...)` cannot be handed it as a fallback.
+    if (c['warn_pct'] === null) out.context.warn_pct = null;
+    else if (c['warn_pct'] !== undefined) {
+      out.context.warn_pct = int(c['warn_pct'], 'context.warn_pct', 60, 1, 99);
+    }
   }
 
   if (doc['checkpoint'] !== undefined && doc['checkpoint'] !== null) {
@@ -287,7 +430,8 @@ export function validatePolicy(doc: YamlValue, base: Policy): Policy {
 
 function parseCommandRule(raw: YamlValue, where: string): CommandRule {
   if (!isObj(raw)) throw new PolicyError('expected a mapping with id/pattern/reason/action', where);
-  rejectUnknown(raw, ['id', 'pattern', 'reason', 'action', 'outsideRepoOnly'], where);
+  rejectUnknown(raw, ['id', 'pattern', 'reason', 'action', 'outsideRepoOnly',
+                      'protectedBranchOnly'], where);
   const id = raw['id'];
   const pattern = raw['pattern'];
   const reason = raw['reason'];
@@ -308,6 +452,13 @@ function parseCommandRule(raw: YamlValue, where: string): CommandRule {
   if (o !== undefined && o !== null) {
     if (typeof o !== 'boolean') throw new PolicyError('expected true or false', `${where}.outsideRepoOnly`);
     rule.outsideRepoOnly = o;
+  }
+  const pb = raw['protectedBranchOnly'];
+  if (pb !== undefined && pb !== null) {
+    if (typeof pb !== 'boolean') {
+      throw new PolicyError('expected true or false', `${where}.protectedBranchOnly`);
+    }
+    rule.protectedBranchOnly = pb;
   }
   return rule;
 }

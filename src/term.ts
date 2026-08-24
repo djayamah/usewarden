@@ -71,22 +71,77 @@ export function box(title: string, lines: string[], maxWidth = 84): string {
  */
 export function wrapLine(line: string, width: number): string[] {
   if (stripAnsi(line).length <= width) return [line];
-  // Preserve the leading label + spacing as the hanging indent.
-  const m = /^(\S+\s+|\u001b\[[0-9;]*m\S+\u001b\[0m\s+)/.exec(line);
+  // Preserve the leading label + spacing as the hanging indent - but ONLY for a two-column line.
+  //
+  // The incident card and the doctor table lay out `label` and `value` separated by RUNS of
+  // spaces ("when     2026-...", "why      Usewarden: ..."), and a continuation there should line
+  // up under the value. Ordinary prose separates words with ONE space, and indenting its
+  // continuation under the second word produces "Telemetry is OFF. ... send it / <11 spaces> to."
+  // - which reads as a rendering fault even once the words stopped being cut in half.
+  //
+  // Requiring two or more spaces is what separates a column from a sentence.
+  const m = /^(\S+ {2,}|\u001b\[[0-9;]*m\S+\u001b\[0m {2,})/.exec(line);
   const indentWidth = m ? Math.min(stripAnsi(m[1]!).length, Math.floor(width / 3)) : 0;
   const indent = ' '.repeat(indentWidth);
   const out: string[] = [];
   let rest = line;
   let first = true;
-  while (stripAnsi(rest).length > width) {
-    const budget = first ? width : width - indentWidth;
-    const [take, remainder] = splitVisible(rest, budget);
+  // THE LOOP AND THE PUSH MUST AGREE ON THE BUDGET.
+  //
+  // They did not. The condition was `> width` while every continuation line is emitted as
+  // `indent + take`, so the LAST fragment - the one that leaves the loop rather than being split
+  // by it - could be up to `indentWidth` characters wider than the box that contains it. The
+  // result is a card whose bottom border is short, which is what a live incident capture showed:
+  //
+  //     |          first (`git add x`), or make a targeted edit that keeps what is there. |
+  //
+  // It goes wrong only for a final fragment between `width - indentWidth` and `width` long, which
+  // is why it survived the wrapping work that fixed the mid-word splits. Found by reading a real
+  // incident card, not by a test - the same way the split-words defect was found.
+  const budget = (): number => (first ? width : width - indentWidth);
+  while (stripAnsi(rest).length > budget()) {
+    const [take, remainder] = splitVisibleAtWord(rest, budget());
     out.push(first ? take : indent + take);
     rest = remainder;
     first = false;
   }
   if (stripAnsi(rest).length > 0) out.push(first ? rest : indent + rest);
   return out;
+}
+
+/**
+ * Splits after at most `n` visible characters, PREFERRING A WORD BOUNDARY.
+ *
+ * `splitVisible` cuts at exactly n and nothing backed off to a space, so every box in the CLI
+ * broke words in half. The first screen a new user sees after `usewarden init` read
+ *
+ *     v1 ships no endpoint to send it t
+ *     o.
+ *
+ * and `demo` - the command whose entire job is to produce a screenshot-worthy incident card -
+ * rendered "executes un / reviewed remote code" and "Pu / sh to a feature branch". It is
+ * cosmetic and it is on the two screens this product is judged by.
+ *
+ * A long unbreakable token - an absolute path, a URL, a command line - must still hard-split, or
+ * a single 200-character path would blow the box apart. So the backtrack is bounded: give up and
+ * cut mid-token if the last space is in the first 40% of the budget.
+ */
+function splitVisibleAtWord(s: string, n: number): [string, string] {
+  const [hard, hardRest] = splitVisible(s, n);
+  if (hardRest.length === 0) return [hard, hardRest];
+  // Already a clean break: the remainder begins at a space.
+  if (/^\s/.test(hardRest)) return [hard.replace(/\s+$/, ''), hardRest.replace(/^\s+/, '')];
+
+  let visible = 0;
+  let lastSpaceIdx = -1;
+  let lastSpaceVisible = 0;
+  for (let i = 0; i < hard.length; i++) {
+    if (hard[i] === '\u001b') { const e = hard.indexOf('m', i); if (e === -1) break; i = e; continue; }
+    if (hard[i] === ' ') { lastSpaceIdx = i; lastSpaceVisible = visible; }
+    visible++;
+  }
+  if (lastSpaceIdx < 0 || lastSpaceVisible < n * 0.4) return [hard, hardRest];
+  return [s.slice(0, lastSpaceIdx).replace(/\s+$/, ''), s.slice(lastSpaceIdx + 1)];
 }
 
 /** Splits `s` after `n` VISIBLE characters, keeping ANSI sequences with the first half. */

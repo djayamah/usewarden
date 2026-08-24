@@ -128,9 +128,32 @@ describe('dashboard rendering', () => {
     assert.equal(/<html[^>]*data-theme=/.test(html), false, 'only "dark" and "light" may reach the html tag');
   });
 
-  test('the checklist and the live-catch count both appear', () => {
+  test('the checklist and the real-session figures both appear', () => {
     const html = renderHtml(snapshot(store), 't');
     assert.match(html, /First catch in a real session/);
-    assert.match(html, /catches in real sessions/);
+    assert.match(html, /actions blocked \(real sessions\)/);
+    assert.match(html, /distinct actions blocked/);
+  });
+
+  /**
+   * The dashboard is the screenshot surface. A demo block appearing in the headline stat is the
+   * exact defect recorded in verification/metrics-inflation-before.txt, so it is asserted here
+   * with the sabotage landed first: the demo incident really is in the database.
+   */
+  test('a demo incident is shown, labelled, and kept OUT of the headline figure', () => {
+    const before = snapshot(store).metrics.live.attempts;
+    store.addIncident({
+      sessionId: 'demo-sess', agent: 'claude', ts: Date.now(), layer: 1, severity: 'block',
+      action: 'block', rule: 'commands.deny[0] (curl-pipe-sh)', title: 'Blocked command',
+      attempted: '$ curl x | sh', reason: 'demo', tool: 'Bash', target: 'curl x | sh', cwd: sb.repo,
+    }, false, 'demo');
+    // sabotage landed: the demo block really is recorded.
+    const snap = snapshot(store);
+    assert.equal(snap.metrics.demo.attempts, 1, 'setup failed - no demo incident was stored');
+
+    assert.equal(snap.metrics.live.attempts, before, 'a demo run moved the real-session figure');
+    const html = renderHtml(snap, 't');
+    assert.match(html, /came from <code>usewarden demo<\/code> and are excluded/);
+    assert.match(html, /<span class="fixture">demo<\/span>/, 'the demo card must say so');
   });
 });

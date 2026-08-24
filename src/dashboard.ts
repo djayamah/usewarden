@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { Store } from './store.js';
 import { buildStatus } from './status.js';
 import { head, dim, ok } from './term.js';
+import { fmtTokenBand, fmtUsdBand, type Metrics } from './metrics.js';
 
 /**
  * Local read-only dashboard.
@@ -100,6 +101,8 @@ export interface Snapshot {
   overall: string;
   agents: { label: string; state: string; configPath: string }[];
   counters: Record<string, number>;
+  /** Derived, per-origin figures. Everything the page displays comes from here. */
+  metrics: Metrics;
   liveCatches: number;
   totalCatches: number;
   judgeUsd: number;
@@ -108,7 +111,7 @@ export interface Snapshot {
   contextWarnPct: number;
   incidents: {
     ts: number; agent: string; action: string; title: string; attempted: string;
-    reason: string; rule: string; live: number; layer: number; severity: string;
+    reason: string; rule: string; live: number; origin: string; layer: number; severity: string;
   }[];
   generatedAt: number;
 }
@@ -119,6 +122,7 @@ export function snapshot(store: Store): Snapshot {
     overall: r.overall,
     agents: r.agents.map((a) => ({ label: a.label, state: a.state, configPath: displayPath(a.configPath) })),
     counters: r.counters,
+    metrics: r.metrics,
     liveCatches: r.liveCatches,
     totalCatches: r.totalCatches,
     judgeUsd: r.judge.usd,
@@ -128,7 +132,7 @@ export function snapshot(store: Store): Snapshot {
     incidents: store.recentIncidents(50).map((i) => ({
       ts: i.ts, agent: i.agent, action: i.action, title: i.title,
       attempted: displayPath(i.attempted), reason: displayPath(i.reason),
-      rule: i.rule, live: i.live, layer: i.layer, severity: i.severity,
+      rule: i.rule, live: i.live, origin: i.origin, layer: i.layer, severity: i.severity,
     })),
     generatedAt: Date.now(),
   };
@@ -157,7 +161,7 @@ export function renderHtml(d: Snapshot, token: string, theme?: string | null): s
           <span class="when">${esc(new Date(i.ts).toISOString().replace('T', ' ').slice(0, 19))}Z</span>
         </header>
         <dl>
-          <dt>agent</dt><dd>${esc(i.agent)} ${i.live ? '<span class="live">live session</span>' : '<span class="fixture">fixture</span>'}</dd>
+          <dt>agent</dt><dd>${esc(i.agent)} ${i.origin === 'live' ? '<span class="live">live session</span>' : `<span class="fixture">${esc(i.origin)}</span>`}</dd>
           <dt>attempt</dt><dd><code>${esc(i.attempted)}</code></dd>
           <dt>why</dt><dd>${esc(i.reason)}</dd>
           <dt>rule</dt><dd><code>${esc(i.rule)}</code> <span class="layer">layer ${i.layer}</span></dd>
@@ -178,7 +182,7 @@ main{max-width:900px;margin:0 auto;padding:32px 20px 80px}
 h1{font-size:20px;margin:0 0 4px;letter-spacing:.04em}
 .state{display:inline-block;padding:3px 10px;border-radius:4px;font-weight:700;letter-spacing:.08em}
 .state.good{background:var(--good);color:#06170b}.state.bad{background:var(--bad);color:#2b0705}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:24px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:12px;margin:24px 0}
 .stat{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:14px}
 .stat b{display:block;font-size:26px;line-height:1.1}
 .stat span{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
@@ -208,13 +212,20 @@ footer{color:var(--dim);font-size:11px;margin-top:32px;border-top:1px solid var(
 <p style="color:var(--dim);margin:0">Read-only. Bound to 127.0.0.1. No external assets.</p>
 
 <div class="grid">
-  <div class="stat"><b>${d.counters['actions_blocked'] ?? 0}</b><span>actions blocked</span></div>
-  <div class="stat"><b>${d.counters['drift_caught'] ?? 0}</b><span>drift warnings</span></div>
-  <div class="stat"><b>${d.liveCatches}</b><span>catches in real sessions</span></div>
-  <div class="stat"><b>${d.counters['events_seen'] ?? 0}</b><span>events inspected</span></div>
+  <div class="stat"><b>${d.metrics.live.attempts}</b><span>actions blocked (real sessions)</span></div>
+  <div class="stat"><b>${d.metrics.live.distinct_actions}</b><span>distinct actions blocked</span></div>
+  <div class="stat"><b>${d.metrics.live.drift_warnings}</b><span>drift warnings</span></div>
+  <div class="stat"><b>${d.metrics.live.events}</b><span>events inspected</span></div>
   <div class="stat"><b>$${d.judgeUsd.toFixed(4)}</b><span>guardian overhead (metered)</span></div>
   <div class="stat"><b>${d.judgeUnmetered}</b><span>judge calls on a local CLI (unpriced)</span></div>
 </div>
+<p style="color:var(--dim);margin:0 0 24px;font-size:12px">
+Estimated saved: <b>${esc(fmtTokenBand(d.metrics.savings.tokens))}</b> &middot; <b>${esc(fmtUsdBand(d.metrics.savings.usd))}</b>.
+An estimate from assumed bands, not a measurement &mdash; ${d.metrics.savings.unpriced_actions} further
+catch(es) are counted but deliberately never priced. Method: <code>usewarden metrics</code>, docs/METRICS.md.
+${d.metrics.integrity.consistent ? '' : '<br><b style="color:var(--bad)">METRICS INCONSISTENT: ' + esc(d.metrics.integrity.problems.join('; ')) + '</b>'}
+</p>
+${d.metrics.demo.incidents > 0 ? `<p style="color:var(--dim);margin:0 0 24px;font-size:12px">${d.metrics.demo.attempts} further block(s) came from <code>usewarden demo</code> and are excluded from every figure above.</p>` : ''}
 
 <h2 style="font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em">Getting started</h2>
 <ul class="check">${d.checklist.map((c) => `<li class="${c.done ? 'done' : ''}">${c.done ? '[x]' : '[ ]'} ${esc(c.label)}</li>`).join('')}</ul>

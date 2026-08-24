@@ -66,6 +66,19 @@ export interface Verdict {
 
 export const ALLOW: Verdict = { decision: 'allow', reason: '', layer: 1, severity: 'info' };
 
+/**
+ * Where an incident came from. This is the anti-inflation axis: every reported number is
+ * computed per origin, so a `usewarden demo` run - or a fixture, or a test - can never move the
+ * figure a user would screenshot. See docs/METRICS.md.
+ *
+ *   live     a real agent session, through the hook path. The only origin that counts.
+ *   demo     `usewarden demo`. Real evaluation, synthetic events, no agent.
+ *   fixture  test fixtures, the sabotage suite, anything hand-fed to the engine.
+ */
+export type IncidentOrigin = 'live' | 'demo' | 'fixture';
+
+export const INCIDENT_ORIGINS: readonly IncidentOrigin[] = ['live', 'demo', 'fixture'];
+
 export interface Incident {
   id?: number;
   sessionId: string;

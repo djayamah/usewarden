@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import type { DatabaseSync as DatabaseSyncType, StatementSync } from 'node:sqlite';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { AgentId, Incident, IntegrityRecord, NormalizedEvent } from './types.js';
+import type { AgentId, Incident, IncidentOrigin, IntegrityRecord, NormalizedEvent } from './types.js';
 import { dbPath, ensureHome } from './paths.js';
 import { mkdirpSafe, sha256 } from './util.js';
 
@@ -24,7 +24,7 @@ function loadSqlite(): SqliteModule {
   return sqlite;
 }
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 3;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   id            TEXT PRIMARY KEY,
   agent         TEXT NOT NULL,
   cwd           TEXT NOT NULL,
+  origin        TEXT NOT NULL DEFAULT 'fixture',
   goal          TEXT,
   started_at    INTEGER NOT NULL,
   ended_at      INTEGER,
@@ -52,6 +53,7 @@ CREATE TABLE IF NOT EXISTS events (
   target      TEXT,
   cwd         TEXT NOT NULL,
   ts          INTEGER NOT NULL,
+  origin      TEXT NOT NULL DEFAULT 'fixture',
   dedupe_hash TEXT NOT NULL UNIQUE
 );
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, ts);
@@ -70,7 +72,9 @@ CREATE TABLE IF NOT EXISTS incidents (
   tool        TEXT NOT NULL,
   target      TEXT NOT NULL,
   cwd         TEXT NOT NULL,
-  live        INTEGER NOT NULL DEFAULT 0
+  live        INTEGER NOT NULL DEFAULT 0,
+  origin      TEXT NOT NULL DEFAULT 'fixture',
+  dedupe_hash TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_incidents_ts ON incidents(ts DESC);
 CREATE TABLE IF NOT EXISTS integrity (
@@ -100,6 +104,17 @@ CREATE TABLE IF NOT EXISTS judge_spend (
 );
 `;
 
+/**
+ * Indexes over columns that arrived in schema v2. They are executed AFTER `migrate()` rather
+ * than inside SCHEMA, because on a v1 database the columns do not exist yet and
+ * `CREATE INDEX ... ON incidents(dedupe_hash)` would throw before the ALTER could add it.
+ */
+const V2_INDEXES = `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_incidents_dedupe ON incidents(dedupe_hash);
+CREATE INDEX IF NOT EXISTS idx_incidents_origin ON incidents(origin);
+CREATE INDEX IF NOT EXISTS idx_events_origin ON events(origin);
+`;
+
 export const CHECKLIST_STEPS = [
   'agents_detected',
   'policy_created',
@@ -124,9 +139,84 @@ export class Store {
     if (this.file !== ':memory:') this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec('PRAGMA busy_timeout = 5000');
     this.db.exec(SCHEMA);
+    this.migrate();
+    this.db.exec(V2_INDEXES);
     this.setMeta('schema_version', String(SCHEMA_VERSION));
     for (const s of CHECKLIST_STEPS) {
       this.q('INSERT OR IGNORE INTO checklist(step, done_at) VALUES(?, NULL)').run(s);
+    }
+  }
+
+  /**
+   * Forward-only schema migration.
+   *
+   * v1 -> v2 adds the `origin` axis (live / demo / fixture) to sessions, events and incidents,
+   * and a dedupe hash to incidents. Both exist for the same reason: before v2 every reported
+   * number came from free-running counters that `usewarden demo` and duplicate hook deliveries
+   * could both inflate. See docs/METRICS.md and DECISIONS D-069.
+   *
+   * Existing rows are backfilled from the one piece of provenance v1 did record: `live`. A v1
+   * row with live=1 really was a real session, so it becomes 'live'; everything else becomes
+   * 'fixture', which is the conservative direction - it can only ever UNDER-report.
+   */
+  private migrate(): void {
+    const has = (table: string, col: string): boolean =>
+      (this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[])
+        .some((c) => c.name === col);
+
+    const addedSessions = !has('sessions', 'origin');
+    const addedEvents = !has('events', 'origin');
+    if (addedSessions) this.db.exec(`ALTER TABLE sessions ADD COLUMN origin TEXT NOT NULL DEFAULT 'fixture'`);
+    if (addedEvents) this.db.exec(`ALTER TABLE events ADD COLUMN origin TEXT NOT NULL DEFAULT 'fixture'`);
+    if (!has('incidents', 'origin')) {
+      this.db.exec(`ALTER TABLE incidents ADD COLUMN origin TEXT NOT NULL DEFAULT 'fixture'`);
+      this.db.exec(`UPDATE incidents SET origin='live' WHERE live=1`);
+    }
+    /**
+     * Sessions and events have no `live` column of their own, so they are backfilled by
+     * inference from the one thing v1 did record: a session that produced a live incident WAS a
+     * live session, and its events were live events.
+     *
+     * Without this the first run against a real pre-v2 database reported eight blocked actions
+     * against zero inspected events - technically conservative, since 'fixture' can only ever
+     * under-report, but visibly impossible on screen. A migration whose output looks broken will
+     * be assumed broken.
+     */
+    if (addedSessions) {
+      this.db.exec(`UPDATE sessions SET origin='live'
+                    WHERE id IN (SELECT DISTINCT session_id FROM incidents WHERE live=1)`);
+    }
+    if (addedEvents) {
+      this.db.exec(`UPDATE events SET origin='live'
+                    WHERE session_id IN (SELECT DISTINCT session_id FROM incidents WHERE live=1)`);
+    }
+    /**
+     * v2 -> v3 exists because the SESSION RECEIPT needs two facts the store never kept.
+     *
+     * `events.context_fill` — peak context fill was only ever observable at the moment it crossed
+     * `context.warn_pct`, i.e. only for sessions that had a problem. A receipt that can report the
+     * number only when something went wrong is the exact shape this build keeps failing at.
+     *
+     * `judge_spend.session_id` — spend was attributable to the whole database and to nothing
+     * smaller. `sessions.judge_calls` and `sessions.judge_cost` exist, and docs/METRICS.md forbids
+     * reporting a stored counter: "derived, never counted... a counter can only be wrong forever".
+     * So the receipt derives spend by query over this column instead.
+     *
+     * Both are added NULL. A pre-v3 row genuinely does not know its value, and the receipt reports
+     * that as `unavailable` with the reason - never as zero. "I could not tell" and "it is fine"
+     * are different sentences (CLAUDE.md §4.4).
+     */
+    if (!has('events', 'context_fill')) {
+      this.db.exec(`ALTER TABLE events ADD COLUMN context_fill REAL`);
+    }
+    if (!has('judge_spend', 'session_id')) {
+      this.db.exec(`ALTER TABLE judge_spend ADD COLUMN session_id TEXT`);
+    }
+
+    if (!has('incidents', 'dedupe_hash')) {
+      // Left NULL for pre-v2 rows on purpose: SQLite treats NULLs as distinct in a UNIQUE
+      // index, so history is preserved rather than being collapsed by a hash it never had.
+      this.db.exec(`ALTER TABLE incidents ADD COLUMN dedupe_hash TEXT`);
     }
   }
 
@@ -148,9 +238,14 @@ export class Store {
   }
 
   // ---- sessions --------------------------------------------------------
-  upsertSession(id: string, agent: AgentId, cwd: string, ts: number): void {
-    this.q('INSERT INTO sessions(id,agent,cwd,started_at) VALUES(?,?,?,?) ON CONFLICT(id) DO NOTHING')
-      .run(id, agent, cwd, ts);
+  /**
+   * Sessions are recorded with the origin of the event that created them, and the origin is
+   * never upgraded afterwards: a session that began as a demo stays a demo for its whole life,
+   * so nothing that starts synthetic can graduate into the live numbers.
+   */
+  upsertSession(id: string, agent: AgentId, cwd: string, ts: number, origin: IncidentOrigin = 'fixture'): void {
+    this.q('INSERT INTO sessions(id,agent,cwd,started_at,origin) VALUES(?,?,?,?,?) ON CONFLICT(id) DO NOTHING')
+      .run(id, agent, cwd, ts, origin);
   }
   setGoal(sessionId: string, goal: string): void {
     this.q('UPDATE sessions SET goal=? WHERE id=?').run(goal, sessionId);
@@ -166,8 +261,16 @@ export class Store {
     const r = this.q('SELECT event_count AS c FROM sessions WHERE id=?').get(sessionId) as { c: number } | undefined;
     return Number(r?.c ?? 0);
   }
-  countSessions(): number {
-    const r = this.q('SELECT COUNT(*) AS c FROM sessions').get() as { c: number };
+  countSessions(origin?: IncidentOrigin): number {
+    const r = origin === undefined
+      ? this.q('SELECT COUNT(*) AS c FROM sessions').get() as { c: number }
+      : this.q('SELECT COUNT(*) AS c FROM sessions WHERE origin=?').get(origin) as { c: number };
+    return Number(r.c);
+  }
+  countEvents(origin?: IncidentOrigin): number {
+    const r = origin === undefined
+      ? this.q('SELECT COUNT(*) AS c FROM events').get() as { c: number }
+      : this.q('SELECT COUNT(*) AS c FROM events WHERE origin=?').get(origin) as { c: number };
     return Number(r.c);
   }
 
@@ -177,12 +280,13 @@ export class Store {
    * saw (Cursor can replay Claude Code hook config - HOOK-MATRIX "duplicate events",
    * DECISIONS D-005). Callers still evaluate policy on duplicates; only the counters skip.
    */
-  recordEvent(e: NormalizedEvent, target: string): boolean {
+  recordEvent(e: NormalizedEvent, target: string, origin: IncidentOrigin = 'fixture'): boolean {
     const hash = dedupeHash(e, target);
     try {
-      this.q(`INSERT INTO events(session_id,agent,event,tool,raw_tool,target,cwd,ts,dedupe_hash)
-              VALUES(?,?,?,?,?,?,?,?,?)`)
-        .run(e.sessionId, e.agent, e.event, e.tool ?? null, e.rawTool ?? null, target, e.cwd, e.ts, hash);
+      this.q(`INSERT INTO events(session_id,agent,event,tool,raw_tool,target,cwd,ts,origin,dedupe_hash,context_fill)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(e.sessionId, e.agent, e.event, e.tool ?? null, e.rawTool ?? null, target, e.cwd, e.ts, origin, hash,
+             typeof e.contextFill === 'number' ? e.contextFill : null);
     } catch {
       return false; // UNIQUE violation == duplicate delivery
     }
@@ -191,23 +295,70 @@ export class Store {
     return true;
   }
 
+  /**
+   * Has THIS session already written to one of these targets?
+   *
+   * The uncommitted-work guard in Layer 1 needs it. An agent's own first write makes a file dirty,
+   * so without this the guard would refuse the agent's second write to its own file. What the
+   * guard actually protects is work the agent did not do, and this is the record of what it did.
+   *
+   * Must be asked BEFORE `recordEvent` stores the current event, or the current write answers for
+   * itself and the guard never fires.
+   */
+  sessionHasWrittenTo(sessionId: string, targets: readonly string[]): boolean {
+    const uniq = [...new Set(targets.filter((t) => t !== ''))];
+    if (uniq.length === 0) return false;
+    const holes = uniq.map(() => '?').join(',');
+    const r = this.q(`SELECT 1 AS x FROM events
+                      WHERE session_id=? AND tool IN ('write','edit') AND target IN (${holes})
+                      LIMIT 1`).get(sessionId, ...uniq) as { x: number } | undefined;
+    return r !== undefined;
+  }
+
   // ---- incidents -------------------------------------------------------
-  addIncident(i: Incident, live: boolean): number {
+  /**
+   * Records an incident, ONCE.
+   *
+   * The dedupe hash is the anti-double-count control. Before schema v2 an event that arrived
+   * twice - the documented Cursor-replays-Claude-Code case (D-005), or an agent's own retry of
+   * the same call inside the same tick - produced two incident rows and bumped every counter
+   * twice, while the events table deduplicated the same pair down to one. That is how a clean
+   * install could report twelve blocked actions against eight inspected events. The bucket is
+   * the same 2s window `dedupeHash` uses, so a genuine repeat attempt seconds later is still
+   * counted as the separate attempt it is.
+   *
+   * Returns the id of the row that now represents this incident - the new one, or the existing
+   * one it collapsed into. Counters are bumped only for a genuinely new row.
+   */
+  addIncident(i: Incident, live: boolean, origin?: IncidentOrigin): number {
+    const org: IncidentOrigin = origin ?? (live ? 'live' : 'fixture');
+    const hash = incidentDedupeHash(i, org);
     const r = this.q(`INSERT INTO incidents
-      (session_id,agent,ts,layer,severity,action,rule,title,attempted,reason,tool,target,cwd,live)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      (session_id,agent,ts,layer,severity,action,rule,title,attempted,reason,tool,target,cwd,live,origin,dedupe_hash)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(dedupe_hash) DO NOTHING`)
       .run(i.sessionId, i.agent, i.ts, i.layer, i.severity, i.action, i.rule, i.title,
-           i.attempted, i.reason, i.tool, i.target, i.cwd, live ? 1 : 0);
+           i.attempted, i.reason, i.tool, i.target, i.cwd, live ? 1 : 0, org, hash);
+    if (Number(r.changes) === 0) {
+      const existing = this.q('SELECT id FROM incidents WHERE dedupe_hash=?').get(hash) as { id: number } | undefined;
+      return Number(existing?.id ?? 0);
+    }
     if (i.action === 'block') this.bump('actions_blocked');
     if (i.layer === 2) this.bump('drift_caught');
     if (i.severity !== 'info') this.bump('catches');
     if (live) this.completeStep('first_catch', i.ts);
     return Number(r.lastInsertRowid);
   }
-  recentIncidents(limit = 50): (Incident & { live: number })[] {
+  recentIncidents(limit = 50): (Incident & { live: number; origin: IncidentOrigin })[] {
     return this.q(`SELECT id,session_id AS sessionId,agent,ts,layer,severity,action,rule,title,
-                          attempted,reason,tool,target,cwd,live
+                          attempted,reason,tool,target,cwd,live,origin
                    FROM incidents ORDER BY ts DESC LIMIT ?`).all(limit) as never;
+  }
+  /** Incidents from ONE origin, newest first. The incident wall uses this to label demo cards. */
+  incidentsByOrigin(origin: IncidentOrigin, limit = 50): (Incident & { live: number; origin: IncidentOrigin })[] {
+    return this.q(`SELECT id,session_id AS sessionId,agent,ts,layer,severity,action,rule,title,
+                          attempted,reason,tool,target,cwd,live,origin
+                   FROM incidents WHERE origin=? ORDER BY ts DESC LIMIT ?`).all(origin, limit) as never;
   }
   countIncidents(): number {
     const r = this.q('SELECT COUNT(*) AS c FROM incidents').get() as { c: number };
@@ -257,10 +408,10 @@ export class Store {
   }
 
   // ---- judge spend -----------------------------------------------------
-  recordJudgeSpend(provider: string, model: string, inTok: number, outTok: number, cost: number, mocked: boolean): void {
-    this.q(`INSERT INTO judge_spend(ts,provider,model,in_tokens,out_tokens,cost_usd,mocked)
-            VALUES(?,?,?,?,?,?,?)`)
-      .run(Date.now(), provider, model, inTok, outTok, cost, mocked ? 1 : 0);
+  recordJudgeSpend(provider: string, model: string, inTok: number, outTok: number, cost: number, mocked: boolean, sessionId?: string): void {
+    this.q(`INSERT INTO judge_spend(ts,provider,model,in_tokens,out_tokens,cost_usd,mocked,session_id)
+            VALUES(?,?,?,?,?,?,?,?)`)
+      .run(Date.now(), provider, model, inTok, outTok, cost, mocked ? 1 : 0, sessionId ?? null);
   }
   /**
    * `usd` only covers METERED providers. Calls routed through a local agent CLI cost the user
@@ -285,6 +436,11 @@ export class Store {
  * for the same logical call (DECISIONS D-005). Timestamps are bucketed to 2s so two deliveries
  * of one call collapse, while two genuinely identical calls seconds apart do not.
  */
+export function incidentDedupeHash(i: Incident, origin: IncidentOrigin): string {
+  const bucket = Math.floor(i.ts / 2000);
+  return sha256([origin, i.sessionId, String(i.layer), i.rule, i.action, i.tool, i.target, String(bucket)].join(' '));
+}
+
 export function dedupeHash(e: NormalizedEvent, target: string): string {
   const bucket = Math.floor(e.ts / 2000);
   return sha256([e.sessionId, e.event, e.tool ?? '', target, String(bucket)].join(' '));

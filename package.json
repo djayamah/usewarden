@@ -24,7 +24,11 @@
     "build": "tsc -p tsconfig.json && node -e \"const f='dist/src/cli.js';require('fs').chmodSync(f,0o755);\"",
     "test": "node --test --test-timeout=120000 \"dist/tests/**/*.test.js\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "verify": "npm run build && npm test"
+    "verify": "npm run build && npm test",
+    "dashboard": "npm run build --silent && node dist/ops/dashboard/src/main.js",
+    "briefing": "npm run build --silent && node dist/ops/dashboard/src/main.js --json",
+    "x-bot-draft": "npm run build --silent && node dist/bots/x/src/draft.js",
+    "dashboard:web": "npm run build --silent && node dist/ops/dashboard/src/web.js"
   },
   "keywords": [
     "ai-agent-safety",

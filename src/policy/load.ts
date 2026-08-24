@@ -165,9 +165,20 @@ function narrowOnly(user: Policy, repo: Policy, repoRoot: string, notices: Polic
   out.commands.deny = [...byId.values()];
 
   // Scalars: restrictive direction only.
+  out.scope.protect_uncommitted = user.scope.protect_uncommitted || repo.scope.protect_uncommitted;
+  if (user.scope.protect_uncommitted && repo.scope.protect_uncommitted === false) {
+    notices.push({
+      code: 'POLICY_WIDENING_REFUSED',
+      detail: 'repo usewarden.yaml tried to turn off scope.protect_uncommitted. Ignored - a cloned repo cannot decide that your uncommitted work is expendable.',
+    });
+  }
   out.session.goal_required = user.session.goal_required || repo.session.goal_required;
   out.checkpoint.auto = user.checkpoint.auto || repo.checkpoint.auto;
-  out.context.warn_pct = Math.min(user.context.warn_pct, repo.context.warn_pct);
+  // Restrictive direction with nulls: an unset threshold is "no warning", so the tighter of the
+  // two is whichever is actually set, and the lower when both are.
+  out.context.warn_pct = user.context.warn_pct === null ? repo.context.warn_pct
+    : repo.context.warn_pct === null ? user.context.warn_pct
+      : Math.min(user.context.warn_pct, repo.context.warn_pct);
   out.judge.enabled = user.judge.enabled;
   if (repo.judge.enabled === false && user.judge.enabled === true) {
     notices.push({
@@ -221,6 +232,11 @@ export function starterPolicyYaml(repoRoot: string): string {
   lines.push('  forbidden_paths:');
   for (const f of p.scope.forbidden_paths) lines.push(`    - ${quote(f)}`);
   lines.push('');
+  lines.push('  # Refuse a whole-file overwrite of anything git cannot get back - a file it has');
+  lines.push('  # never seen, or one with uncommitted changes - unless this session wrote it.');
+  lines.push('  # See docs/GIT-AWARENESS.md for what this can and cannot see.');
+  lines.push(`  protect_uncommitted: ${p.scope.protect_uncommitted}`);
+  lines.push('');
   lines.push('protected_branches:');
   for (const b of p.protected_branches) lines.push(`  - ${quote(b)}`);
   lines.push('');
@@ -242,7 +258,10 @@ export function starterPolicyYaml(repoRoot: string): string {
   lines.push('  goal_required: false');
   lines.push('');
   lines.push('context:');
-  lines.push('  warn_pct: 60');
+  lines.push('  # NOT ENABLED, and not an oversight: this rule reads a context-fill figure that no');
+  lines.push('  # agent reports to a hook, so it cannot fire today. Setting it opts in to a rule');
+  lines.push('  # documented as not-yet-implemented. See docs/POLICY-INPUTS.md.');
+  lines.push('  warn_pct: null');
   lines.push('');
   lines.push('checkpoint:');
   lines.push('  auto: true');
