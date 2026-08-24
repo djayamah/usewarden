@@ -21,20 +21,32 @@
     "SECURITY.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"const f='dist/src/cli.js';require('fs').chmodSync(f,0o755);\"",
     "test": "node --test --test-timeout=120000 \"dist/tests/**/*.test.js\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "verify": "npm run build && npm test"
   },
   "keywords": [
-    "ai",
-    "agent",
-    "security",
-    "guardrails",
-    "hooks",
+    "ai-agent-safety",
+    "agent-guardrails",
+    "llm-guardrails",
+    "ai-code-review",
     "claude-code",
+    "claude-code-hooks",
     "cursor",
-    "gemini-cli"
+    "gemini-cli",
+    "github-copilot-cli",
+    "codex-cli",
+    "prevent-rm-rf",
+    "dotenv-protection",
+    "secret-scanning",
+    "prompt-injection",
+    "agent-drift",
+    "context-rot",
+    "developer-tools",
+    "cli",
+    "security",
+    "devsecops"
   ],
   "devDependencies": {
     "@types/node": "^22.10.5",

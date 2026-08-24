@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { Store } from '../src/store.js';
 import { buildPayload, endpoint, isSafeLabel, record, telemetryEnabled } from '../src/telemetry.js';
@@ -226,4 +227,109 @@ describe('displayPath', () => {
     assert.equal(isInside(displayPath(parent), child), false,
       'a ~-collapsed path must not silently satisfy a scope check');
   });
+});
+
+/**
+ * THE EXECUTE BIT, AGAIN.
+ *
+ * D-012 — the first defect this project ever found, and the one the whole design premise came
+ * from — was a built CLI with no execute bit: every hook died with EACCES while `status` said
+ * PROTECTED. That was fixed in the HOOK path, by registering `<abs node> <abs script>` so the
+ * script never needs to be executable.
+ *
+ * It came back in a place the fix did not cover. `package.json` exposes `dist/src/cli.js` as a
+ * global `bin`, and a global install runs it directly. `tsc` writes 0644, so `npm link` produced
+ * a `usewarden` command that answered every invocation with "permission denied" — found by
+ * installing it, not by any test. Every `npm i -g usewarden` user would have hit it.
+ *
+ * The build now sets the mode, and this asserts it, because "npm probably chmods bin entries" is
+ * exactly the kind of assumption D-012 punished the first time.
+ */
+describe('the built CLI is executable', () => {
+  test('dist/src/cli.js has the execute bit after a build', () => {
+    const cli = path.join(REPO, 'dist', 'src', 'cli.js');
+    assert.equal(fs.existsSync(cli), true, 'setup failed - run npm run build first');
+    if (process.platform !== 'win32') {
+      const mode = fs.statSync(cli).mode & 0o777;
+      assert.ok((mode & 0o111) !== 0,
+        `dist/src/cli.js is ${mode.toString(8)} - a global install would fail with EACCES`);
+    }
+  });
+
+  test('it starts with a shebang, which is what makes the bin entry runnable', () => {
+    const first = fs.readFileSync(path.join(REPO, 'dist', 'src', 'cli.js'), 'utf8').split('\n')[0]!;
+    assert.match(first, /^#!/, 'a bin entry without a shebang cannot be executed directly');
+  });
+
+  test('the build script sets the mode rather than trusting the packager to', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')) as
+      { scripts?: Record<string, string>; bin?: Record<string, string> };
+    assert.match(pkg.scripts?.['build'] ?? '', /chmod/i,
+      'the build must set the execute bit itself');
+    assert.equal(pkg.bin?.['usewarden'], 'dist/src/cli.js');
+  });
+});
+
+/**
+ * THE ENTRY POINT, INVOKED THE WAY A USER INVOKES IT.
+ *
+ * Every other test in this suite imports a module. That is why `--version` printed the entire
+ * 43-line usage text, in every published version, for as long as the flag has existed: with no
+ * positional argument `cmd` is `undefined`, the help branch fired on `cmd === undefined` before
+ * the version check was reached, and nothing ever ran the real binary with a bare flag.
+ *
+ * `usewarden foo --version` DID print the version, which is exactly why it survived — the broken
+ * form is the one everybody types and the working form is the one nobody does.
+ *
+ * Found by running the packed tarball (D2 of the release runbook) rather than the repository. That
+ * step exists to be sceptical about the artifact, and this is what it caught.
+ */
+describe('the CLI entry point, run as a subprocess', () => {
+  const CLI = path.join(REPO, 'dist', 'src', 'cli.js');
+  const run = (...argv: string[]): { out: string; code: number | null } => {
+    const r = spawnSync(process.execPath, [CLI, ...argv],
+      { encoding: 'utf8', timeout: 30_000, killSignal: 'SIGKILL' });
+    return { out: `${r.stdout ?? ''}${r.stderr ?? ''}`, code: r.status };
+  };
+
+  test('--version prints ONLY the version', () => {
+    const { out, code } = run('--version');
+    assert.equal(code, 0);
+    assert.equal(out.trim(), VERSION_FROM_PKG(),
+      '--version must print the version and nothing else');
+    assert.equal(out.trim().split('\n').length, 1, 'exactly one line');
+  });
+
+  test('-V behaves identically to --version', () => {
+    assert.equal(run('-V').out.trim(), run('--version').out.trim());
+  });
+
+  test('--version --json is machine-readable', () => {
+    const { out } = run('--version', '--json');
+    assert.deepEqual(JSON.parse(out.trim()), { version: VERSION_FROM_PKG() });
+  });
+
+  test('--version does NOT print the usage text', () => {
+    // The specific regression. `USAGE` contains this heading and nothing else does.
+    assert.ok(!run('--version').out.includes('COMMANDS'),
+      '--version printed the help text - the flag ordering regressed');
+  });
+
+  test('--help still prints usage, and so does a bare invocation', () => {
+    for (const argv of [['--help'], ['-h'], []]) {
+      const { out, code } = run(...argv);
+      assert.equal(code, 0, `${argv.join(' ') || '(bare)'} should exit 0`);
+      assert.ok(out.includes('COMMANDS'), `${argv.join(' ') || '(bare)'} should print usage`);
+    }
+  });
+
+  test('--help wins when both are given, rather than the two racing', () => {
+    assert.ok(run('--help', '--version').out.includes('COMMANDS'));
+  });
+
+  function VERSION_FROM_PKG(): string {
+    const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')) as
+      { version: string };
+    return pkg.version;
+  }
 });

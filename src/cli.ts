@@ -61,12 +61,23 @@ async function main(argv: string[]): Promise<number> {
   const cmd = args[0];
   const json = flags.has('--json');
 
-  if (flags.has('-h') || flags.has('--help') || cmd === 'help' || cmd === undefined) {
-    process.stdout.write(USAGE);
+  // ORDER MATTERS HERE, and getting it wrong made `--version` print the entire help.
+  //
+  // `usewarden --version` has no positional argument, so `cmd` is `undefined` - and the help
+  // branch used to fire on `cmd === undefined` BEFORE the version check was reached. So the flag
+  // this tool's own usage text documents as "Print version" printed the whole usage instead, for
+  // every user of every published version. `usewarden foo --version` worked, which is why it
+  // survived: the broken form is the one everybody types.
+  //
+  // Found by running the PACKED TARBALL rather than the repository. Every other test imports a
+  // module; nothing had ever invoked the real entry point with a bare flag and no command.
+  const wantsHelp = flags.has('-h') || flags.has('--help') || cmd === 'help';
+  if ((flags.has('-V') || flags.has('--version')) && !wantsHelp) {
+    process.stdout.write(json ? JSON.stringify({ version: VERSION }) + '\n' : VERSION + '\n');
     return 0;
   }
-  if (flags.has('-V') || flags.has('--version')) {
-    process.stdout.write(json ? JSON.stringify({ version: VERSION }) + '\n' : VERSION + '\n');
+  if (wantsHelp || cmd === undefined) {
+    process.stdout.write(USAGE);
     return 0;
   }
 
