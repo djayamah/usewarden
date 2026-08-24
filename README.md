@@ -131,6 +131,15 @@ It has an escape hatch for every control it applies, and the reason lines are wr
 agent to self-correct from. If it ever reports a state it cannot verify, it says so loudly rather
 than guessing.
 
+**Will it ever block something legitimate?**
+Yes, and it has — it blocked this project's own author twice in one day: once for writing a release
+runbook whose text contained the words `npm publish`, and once for a security test fixture that
+contained a dangerous command as test data. Both times it mistook a description of a command for the
+command. That class is fixed; the general problem does not go away.
+[docs/FALSE-POSITIVES.md](docs/FALSE-POSITIVES.md) is the honest account — what to do when it
+happens to you, what we will not do about it, and the one gap still open. Worth two minutes before
+you install rather than after.
+
 ---
 
 ## Why this exists
@@ -200,7 +209,7 @@ non-zero for the last two, so it works in a shell prompt or a CI step.
 ## What it actually does
 
 **Layer 1 — deterministic, zero tokens, every single event.** Scope globs, command patterns,
-protected branches, sibling-repo detection, context-fill threshold. Measured to catch **15 of 17**
+protected branches, sibling-repo detection, context-fill threshold. Measured to catch **14 of 17**
 of usewarden's own sabotage suite on its own, with no model involved.
 
 **Layer 2 — a sampled LLM drift judge.** Compares what the agent is doing against the goal you
@@ -315,6 +324,15 @@ Plus scope: writes outside `allowed_paths` are blocked, and usewarden tells the 
 when the target is a different repository sitting next door — the most damaging real-world drift
 on a machine with many checkouts.
 
+**And inside your repo, scope alone is not enough.** `allowed_paths` permits every write in the
+project, which is the hole the
+[documented incident in anthropics/claude-code#53900](https://github.com/anthropics/claude-code/issues/53900)
+went through: the agent destroyed a file that was in the project and had never been committed. So
+`scope.protect_uncommitted` refuses a **whole-file overwrite** of anything git could not get back —
+untracked, or holding uncommitted changes — unless the agent wrote that file itself this session.
+It reads `.git/index` directly rather than shelling out, and everything it cannot decide it leaves
+alone. `docs/GIT-AWARENESS.md` has the exact rule and every limit.
+
 **And it does not over-block.** `npm test`, `git commit`, `git push origin feature/x`, and
 `rm -rf ./dist` all pass straight through. A guardian that blocks ordinary work gets uninstalled
 by lunchtime, so there is a test asserting each of those is allowed.
@@ -419,6 +437,77 @@ Stated plainly, because a security tool that oversells is worse than none.
   (`verification/live/08-ab-removal.txt`).
 - **Usewarden trusts the agent's own report of what it is about to do.** If an agent lies about
   its tool input, usewarden evaluates the lie.
+- **The context-fill threshold is not enabled, and that is deliberate.** `context.warn_pct` reads
+  a figure no agent sends: Claude Code's hook payload — the best documented of the six — carries no
+  token count and no context percentage at all. It used to ship enabled and could never fire, so it
+  is now `null` by default, `usewarden policy` refuses to print it, and
+  [`tests/policy-inputs.test.ts`](tests/policy-inputs.test.ts) fails if any *other* default rule
+  ever depends on a field no adapter populates. See [`docs/POLICY-INPUTS.md`](docs/POLICY-INPUTS.md).
+  Reviving it means an agent reporting the figure; parsing transcripts to guess it would be a
+  number with nothing behind it.
+
+---
+
+## Known false positives — the ones we have hit ourselves
+
+A guardrail that blocks something legitimate does not cost you one alert, it costs every later
+alert, because
+[engineers who see a security tool produce one bad finding stop believing its other output](https://www.reversinglabs.com/blog/appsec-alert-fatigue-4-ways-to-reduce-the-risk-of-burnout).
+These are named here rather than left for you to discover. A named limitation is defensible; a
+surprise is why tools get uninstalled. The full write-up is in [`docs/FALSE-POSITIVES.md`](docs/FALSE-POSITIVES.md).
+
+### Text *about* a dangerous command can be mistaken for the command
+
+This one has bitten this project's own maintainer **five times in one day, across three syntaxes**.
+The deny rules match the command string, and a command string can contain text that is data.
+
+**Fixed — heredoc bodies.** Writing a file whose contents mention a blocked command works:
+
+```bash
+cat > notes.md <<'EOF'
+Never run rm -rf ~/ on a production box.
+EOF
+```
+
+Usewarden strips heredoc bodies before matching, unless the line that opens the heredoc names
+something that would execute them (`bash <<EOF`, `python3 - <<EOF`, `cat <<EOF | bash`). It took
+four attempts; the failures are documented because they are the interesting part.
+
+**NOT fixed — the same text as a quoted argument.** This is refused:
+
+```bash
+printf '%s\n' 'the release step runs the publish command' >> notes.md
+```
+
+A quoted argument to `printf` is data, and usewarden cannot tell it from an invocation. Telling
+them apart needs real shell tokenisation with quote tracking on the hottest path in the product,
+and `commandTargetsOnlyAllowedPaths` already shows what a half-tokenised implementation costs — it
+reads option values as paths. Doing it badly opens holes. Doing it well is its own piece of work.
+
+**The workaround, which is what we use:** write the text with a file tool rather than through a
+shell argument. Your agent's `Write` or `Edit` tool is not affected by any of this — only `Bash` is.
+
+**And the residual heredoc gap, stated rather than hidden:** a command that executes its heredoc
+without naming a recognised interpreter — `docker run img <<EOF`, or `$SHELL <<EOF` — has its body
+treated as data. Scope still governs every write, so this narrows what is matched, not what is
+allowed.
+
+### A file ignored only by your *global* gitignore reads as untracked
+
+`scope.protect_uncommitted` refuses a whole-file overwrite of work git could not restore. It reads
+your repository's `.gitignore` and `.git/info/exclude`, but **not** `core.excludesFile` — your
+machine-wide ignore list. A file ignored only there looks untracked, so a wholesale overwrite of it
+is refused once. Stage it, or add the pattern to the repository's own `.gitignore`.
+[`docs/GIT-AWARENESS.md`](docs/GIT-AWARENESS.md) lists every limit of that rule.
+
+### There is no per-incident "allow this once"
+
+Today the escape hatch is the policy file — a thirty-second edit, but not a one-keystroke one.
+Mature scanners solve this with inline suppression carrying a justification (`#nosec`, `//nolint`),
+which does not transfer directly: a usewarden finding is an agent action at a moment, not a line of
+source, so there is nowhere to put a comment. The planned shape is a human-run
+`usewarden allow <rule-id>` recording a scoped, dated, **expiring** exception outside the policy
+file, with a listing command so exceptions stay auditable. The agent will never be able to invoke it.
 
 ---
 
@@ -463,6 +552,8 @@ version: 1
 scope:
   allowed_paths: ["/Users/you/dev/your-project"]
   forbidden_paths: ["~/.ssh", "~/.aws", "**/.env", "**/*.pem"]
+  # Refuse a whole-file overwrite of work git could not restore. On by default.
+  protect_uncommitted: true
 protected_branches: ["main", "master", "release", "production"]
 invariants:
   - "CI configuration under .github/ is owned by the platform team."
@@ -547,7 +638,7 @@ Node **≥ 22.13.0** (Node 22 *Jod* and 24 *Krypton* are the Active LTS lines; 2
 ```bash
 npm install
 npm run build
-npm test                          # 392 tests, no network, no API keys required
+npm test                          # 667 tests, no network, no API keys required
 ./scripts/verify-all.sh           # every gate: build, both Node lines, fixtures, screenshots, CLI smoke
 ./scripts/make-fixture.sh         # build the sabotage fixture
 ./scripts/screenshot-synthetic.sh # re-render the published screenshots
