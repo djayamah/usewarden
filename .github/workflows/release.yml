@@ -90,9 +90,30 @@ jobs:
       # Staged publishing needs npm >= 11.15.0. Asserted rather than assumed: if the floor is not
       # met, the stage step would fail late, after the build and the tests, with an error about an
       # unknown command - which reads as a broken workflow rather than as a missing floor.
+      #
+      # THE npm VERSION IS PINNED, AND `@latest` IS WHAT BROKE THIS.
+      #
+      # This file SHA-pins every action on the stated grounds that "a tag is mutable; a SHA is not"
+      # - and then installed `npm@latest`, an unpinned moving target, in the single most sensitive
+      # step it has. That inconsistency stopped being theoretical on 2026-08-24: `npm@latest` had
+      # become 12.0.2, whose engines are `^22.22.2 || ^24.15.0 || >=26.0.0`, and the Node pinned
+      # below is 22.14.0. The install was refused with EBADENGINE, npm stayed at the runner's
+      # bundled 10.9.2, and the floor check correctly failed the run.
+      #
+      # 11.19.0 is the last of the 11 line and declares `^20.17.0 || >=22.9.0`, so it installs on
+      # the Node floor below and clears the 11.15.0 staged-publishing floor. Bumping Node instead
+      # would fix today's symptom and leave the cause: the next npm major to raise its engines
+      # would break the release path again, at the worst possible moment, on a machine nobody was
+      # watching. Verify before changing either number:
+      #
+      #     npm view npm@<version> engines.node
+      #
+      # The floor check below is KEPT even though the version is now pinned. It is what turned an
+      # EBADENGINE into a named failure, and a pin that is silently not in effect is exactly the
+      # thing it exists to catch.
       - name: Ensure npm supports staged publishing
         run: |
-          npm install -g npm@latest
+          npm install -g npm@11.19.0
           node -e '
             const need = [11, 15, 0];
             const v = require("child_process").execSync("npm --version").toString().trim();
