@@ -48,6 +48,12 @@ interface ProviderConfig {
    * for them, so reporting a dollar figure would be invented precision. `usewarden status` says so.
    */
   metered: boolean;
+  /**
+   * True when `judge.model` in usewarden.yaml names something other than the tier this provider
+   * is priced for. The token counts stay exact; only the USD column becomes an estimate at the
+   * wrong rates, and every surface that shows a dollar figure says so.
+   */
+  modelOverridden?: boolean;
 }
 
 /**
@@ -126,19 +132,65 @@ const PROVIDERS: Record<MeteredProvider, ProviderSpec> = {
   anthropic: {
     env: 'ANTHROPIC_API_KEY', model: 'claude-haiku-4-5',
     inPer1M: 1.00, outPer1M: 5.00,
-    pricedOn: '2026-08-19', pricingSource: 'https://claude.com/pricing#api',
+    pricedOn: '2026-08-20', pricingSource: 'https://platform.claude.com/docs/en/about-claude/pricing',
   },
   openai: {
+    // Re-checked 2026-08-20 and CORRECTED: this row said $0.125/$1.00, which was half the real
+    // price. Token counts are always exact, so the error could never corrupt usage - but it
+    // under-reported every OpenAI dollar figure by 2x, which is the direction that matters least
+    // to a vendor and most to a user deciding whether the guardian is worth its cost.
     env: 'OPENAI_API_KEY', model: 'gpt-5-mini',
-    inPer1M: 0.125, outPer1M: 1.00,
-    pricedOn: '2026-08-19', pricingSource: 'https://openai.com/api/pricing/',
+    inPer1M: 0.25, outPer1M: 2.00,
+    pricedOn: '2026-08-20', pricingSource: 'https://developers.openai.com/api/docs/pricing',
   },
   gemini: {
+    // $0.75/$3.75 is an introductory rate that ENDS 2026-12-31, after which the published price
+    // is $1.50/$7.50. `pricingStaleness()` will not catch a scheduled increase - only a re-check
+    // will - so the date is recorded here in the comment as well as in `pricedOn`.
     env: 'GEMINI_API_KEY', model: 'gemini-3.7-flash',
     inPer1M: 0.75, outPer1M: 3.75,
-    pricedOn: '2026-08-19', pricingSource: 'https://ai.google.dev/gemini-api/docs/pricing',
+    pricedOn: '2026-08-20', pricingSource: 'https://ai.google.dev/gemini-api/docs/pricing',
   },
 };
+
+/**
+ * The shape of ONE usewarden judge call, used to rank providers by what they would actually cost
+ * this user. Measured from the fixed prompt: the system block plus a capped 6000-char transcript
+ * window is around 500 input tokens, and the answer is a single small JSON object, around 50
+ * output tokens. `ops/JUDGE-LIVE-CHECK.md` quotes the same figures.
+ *
+ * It is deliberately a REPRESENTATIVE call rather than an average of real traffic: usewarden has
+ * no real traffic to average, and inventing one would be the invented precision docs/METRICS.md
+ * refuses elsewhere.
+ */
+export const REPRESENTATIVE_CALL = { inTok: 500, outTok: 50 } as const;
+
+/** What one representative judge call costs at a provider's current rates, in USD. */
+export function costPerCall(spec: Pick<ProviderSpec, 'inPer1M' | 'outPer1M'>): number {
+  return (REPRESENTATIVE_CALL.inTok / 1_000_000) * spec.inPer1M
+    + (REPRESENTATIVE_CALL.outTok / 1_000_000) * spec.outPer1M;
+}
+
+/**
+ * The metered providers, CHEAPEST FIRST.
+ *
+ * Usewarden's own judge spend lands on the user's bill, not the maintainer's, so when more than
+ * one key is present the default has to be the one that costs them least - not whichever name
+ * happened to be first in a hard-coded array, which is what this used to be.
+ *
+ * The order is COMPUTED from the pricing table rather than written down. That matters more than
+ * it looks: a hand-written order is a second copy of the pricing information, and the two drift.
+ * Re-check a price, and the ordering corrects itself; a test asserts exactly that by reordering
+ * a synthetic table.
+ *
+ * Ties break alphabetically so the result is deterministic.
+ */
+export function rankedProviders(): MeteredProvider[] {
+  return (Object.keys(PROVIDERS) as MeteredProvider[]).sort((a, b) => {
+    const d = costPerCall(PROVIDERS[a]) - costPerCall(PROVIDERS[b]);
+    return d !== 0 ? d : a.localeCompare(b);
+  });
+}
 
 export function providerSpecs(): Record<MeteredProvider, ProviderSpec> { return PROVIDERS; }
 
@@ -152,6 +204,23 @@ export function pricingAgeDays(p: MeteredProvider, now = Date.now()): number {
 export const PRICING_STALE_AFTER_DAYS = 120;
 
 /**
+ * A warning when `judge.model` names a tier usewarden has no price for, else null.
+ *
+ * Overriding the model is supported and sometimes exactly right - it is how you take a cheaper
+ * nano/lite tier, or confirm a model id that has rolled forward without editing code. What is
+ * not acceptable is usewarden quietly pricing the model you chose at the rates of the model you
+ * did not. Token counts stay exact either way.
+ */
+export function modelOverrideWarning(cfg: { provider: Provider; model: string; modelOverridden?: boolean }): string | null {
+  if (!cfg.modelOverridden) return null;
+  const spec = PROVIDERS[cfg.provider as MeteredProvider];
+  if (!spec) return null;
+  return `JUDGE_MODEL_OVERRIDDEN: judge.model is "${cfg.model}", but usewarden only has prices for `
+    + `"${spec.model}" ($${spec.inPer1M}/$${spec.outPer1M} per 1M). Token counts are exact; the USD `
+    + `figure is an ESTIMATE at the wrong rates. Re-check ${spec.pricingSource}.`;
+}
+
+/**
  * A warning string when a provider's prices are older than the staleness window, else null.
  * Surfaced by `usewarden status`, so the dollar column never quietly drifts away from reality.
  */
@@ -163,18 +232,190 @@ export function pricingStaleness(p: MeteredProvider, now = Date.now()): string |
 }
 function PRICES_DATE(p: MeteredProvider): string { return PROVIDERS[p].pricedOn; }
 
+/**
+ * Picks the judge provider.
+ *
+ * CHEAPEST-CAPABLE, not first-key-found. See `rankedProviders()` for why the order is computed.
+ *
+ * "Capable" is doing real work in that phrase, and it is worth being explicit about what it
+ * means here, because every vendor sells something cheaper than the tier named in `PROVIDERS`:
+ * gpt-5-nano at $0.05/$0.40, gemini-3.5-flash-lite at $0.30/$2.50. Usewarden does not default to
+ * those. The judge is a security control whose failure mode is a MISSED drift - it fails quiet -
+ * and usewarden has never verified that a high-throughput nano/lite tier holds up on this task:
+ * read a transcript window, make a judgement call, emit strict JSON. Defaulting to one would
+ * make every user's first judge call an unadvertised experiment on a control they are trusting.
+ *
+ * Anyone who wants that trade can take it in one line - `judge.model` in `usewarden.yaml` - and
+ * usewarden will then tell them the dollar figure is an estimate at the default tier's rates,
+ * because it has no price for a model it does not ship.
+ */
+/**
+ * What a credential LOOKS like, without ever reading what it says.
+ *
+ * ============================================================================================
+ * WHY THIS EXISTS
+ * ============================================================================================
+ * On 2026-08-20 a doubled paste put a 106-character value in the Keychain and the only signal
+ * usewarden gave was `HTTP 401 AUTH. The API key was rejected`. Diagnosing that took ruling out
+ * the auth header, the API version, and the model id one at a time before the credential itself
+ * became the suspect - and the answer was visible in the value's SHAPE the entire time.
+ *
+ * A 401 is the provider's answer to "is this key valid". It is not an answer to "did you paste
+ * it twice", and the difference is minutes of someone's evening. So usewarden now looks at the
+ * shape BEFORE the call and attaches what it saw to the failure.
+ *
+ * Every field it may report is a coarse property - length, which known prefix class it matched,
+ * how many times a prefix occurs. It never reads, returns, stores, or logs the value, and every
+ * message below is assembled from constants and integers only.
+ *
+ * It NEVER blocks the call. Google changed the Gemini key format from `AIza`+35 to `AQ.`+50
+ * without publishing a spec, and a shape check that refused an unrecognised format would have
+ * locked out every new user that week. Unknown shape is a warning, not a verdict.
+ */
+export type KeyShapeCode = 'ok' | 'unknown_format' | 'doubled' | 'too_short' | 'wrong_provider' | 'whitespace';
+
+export interface KeyShape {
+  ok: boolean;
+  code: KeyShapeCode;
+  /** Safe to display: a fixed sentence plus integers. Never contains any part of the value. */
+  message: string;
+}
+
+/**
+ * Known credential formats, by the provider they belong to.
+ *
+ * Each carries a plausible LENGTH RANGE as well as a prefix, and the range is load-bearing.
+ * With an unbounded pattern, an `AQ.` key concatenated with an `AIza` key is still all
+ * url-safe-base64 after the `AQ.`, so it matched the current-format pattern and was reported as
+ * a perfectly good key. Bounding the length turns that concatenation back into what it is.
+ *
+ * The ranges are deliberately generous around the observed sizes: a vendor is entitled to add a
+ * few characters without usewarden calling the result malformed.
+ */
+interface KeyFormat { label: string; prefix: string; min: number; max: number; body: RegExp }
+
+const KEY_PREFIXES: Record<MeteredProvider, KeyFormat[]> = {
+  anthropic: [{ label: 'sk-ant-', prefix: 'sk-ant-', min: 40, max: 200, body: /^[A-Za-z0-9_-]+$/ }],
+  openai: [
+    { label: 'sk-proj-', prefix: 'sk-proj-', min: 40, max: 250, body: /^[A-Za-z0-9_-]+$/ },
+    { label: 'sk-', prefix: 'sk-', min: 20, max: 250, body: /^[A-Za-z0-9_-]+$/ },
+  ],
+  gemini: [
+    // Legacy AI Studio format: AIza + 35 = 39 characters exactly.
+    { label: 'AIza (legacy)', prefix: 'AIza', min: 35, max: 45, body: /^[0-9A-Za-z_-]+$/ },
+    // Current format, observed 2026-08-20: AQ. + 50 = 53 characters.
+    { label: 'AQ. (current)', prefix: 'AQ.', min: 40, max: 90, body: /^[A-Za-z0-9_-]+$/ },
+  ],
+};
+
+function matchesFormat(k: string, f: KeyFormat): boolean {
+  if (!k.startsWith(f.prefix)) return false;
+  if (k.length < f.min || k.length > f.max) return false;
+  return f.body.test(k.slice(f.prefix.length));
+}
+
+/** Every known prefix, across every provider, for concatenation detection. */
+function allFormats(): KeyFormat[] {
+  return (Object.keys(KEY_PREFIXES) as MeteredProvider[]).flatMap((p) => KEY_PREFIXES[p]);
+}
+
+const PROVIDER_KEY_HELP: Record<MeteredProvider, string> = {
+  anthropic: 'An Anthropic key begins "sk-ant-". Create one at https://platform.claude.com/settings/keys',
+  openai: 'An OpenAI key begins "sk-" or "sk-proj-". Create one at https://platform.openai.com/api-keys',
+  gemini: 'A Gemini key begins "AQ." (current, ~53 characters) or "AIza" (legacy, 39 characters). '
+    + 'Create one at https://aistudio.google.com/apikey',
+};
+
+export function inspectKeyShape(provider: MeteredProvider, rawKey: string): KeyShape {
+  const key = rawKey.trim();
+  const help = PROVIDER_KEY_HELP[provider];
+
+  if (rawKey !== key || /\s/.test(key)) {
+    return {
+      ok: false, code: 'whitespace',
+      message: `JUDGE_KEY_SHAPE: the ${provider} credential contains whitespace (${rawKey.length} characters, `
+        + `${key.length} after trimming). That is usually a paste that picked up a newline or a quote. ${help}`,
+    };
+  }
+  if (key.length < 16) {
+    return {
+      ok: false, code: 'too_short',
+      message: `JUDGE_KEY_SHAPE: the ${provider} credential is ${key.length} characters, too short to be an API key. ${help}`,
+    };
+  }
+
+  // Doubled paste: the value is exactly two identical halves. This is the 2026-08-20 case.
+  if (key.length % 2 === 0) {
+    const half = key.length / 2;
+    if (key.slice(0, half) === key.slice(half)) {
+      return {
+        ok: false, code: 'doubled',
+        message: `JUDGE_KEY_SHAPE: the ${provider} credential is ${key.length} characters and its first half is `
+          + `identical to its second - it looks like the same key pasted TWICE. Re-enter it once. ${help}`,
+      };
+    }
+  }
+
+  const matched = KEY_PREFIXES[provider].find((f) => matchesFormat(key, f));
+  if (matched) return { ok: true, code: 'ok', message: `key shape matches the ${matched.label} format for ${provider}` };
+
+  // Concatenation whose halves are not byte-identical: a KNOWN prefix - any vendor's - appearing
+  // somewhere other than the start, in a value longer than any single key of that format.
+  //
+  // Both conditions are required. A prefix can occur mid-key by chance in a base64 body, and a
+  // false "doubled" would be an unhelpful warning; combined with an over-long value it is not a
+  // coincidence. It never refuses the call either way.
+  const longest = Math.max(...KEY_PREFIXES[provider].map((f) => f.max));
+  if (key.length > longest) {
+    for (const f of allFormats()) {
+      const at = key.indexOf(f.prefix, 1);
+      if (at > 0) {
+        return {
+          ok: false, code: 'doubled',
+          message: `JUDGE_KEY_SHAPE: the ${provider} credential is ${key.length} characters and carries a second `
+            + `"${f.prefix}" prefix at position ${at} - it looks like more than one key pasted together. `
+            + `Re-enter one key. ${help}`,
+        };
+      }
+    }
+  }
+
+  // Belongs to a DIFFERENT provider - the single most actionable thing usewarden can say.
+  for (const other of Object.keys(KEY_PREFIXES) as MeteredProvider[]) {
+    if (other === provider) continue;
+    const hit = KEY_PREFIXES[other].find((f) => matchesFormat(key, f));
+    if (hit) {
+      return {
+        ok: false, code: 'wrong_provider',
+        message: `JUDGE_KEY_SHAPE: the value in ${PROVIDERS[provider].env} has the "${hit.label}" shape, which is `
+          + `a ${other} key, not a ${provider} one. It is in the wrong environment variable. ${help}`,
+      };
+    }
+  }
+
+  return {
+    ok: false, code: 'unknown_format',
+    message: `JUDGE_KEY_SHAPE: the ${provider} credential is ${key.length} characters and matches no known `
+      + `${provider} key format. usewarden will still try the call - vendors change key formats without notice, `
+      + `and refusing an unrecognised shape would lock out anyone holding a newer one - but if this fails with `
+      + `HTTP 401, the credential is the first thing to check. ${help}`,
+  };
+}
+
 export function selectProvider(policy: Policy): ProviderConfig | null {
-  for (const p of ['anthropic', 'openai', 'gemini'] as const) {
+  for (const p of rankedProviders()) {
     const cfg = PROVIDERS[p];
     const key = process.env[cfg.env];
     if (key && key.trim() !== '') {
+      const model = policy.judge.model ?? cfg.model;
       return {
         provider: p,
-        model: policy.judge.model ?? cfg.model,
+        model,
         apiKey: key.trim(),
         inPer1M: cfg.inPer1M,
         outPer1M: cfg.outPer1M,
         metered: true,
+        modelOverridden: model !== cfg.model,
       };
     }
   }
@@ -280,7 +521,7 @@ export async function maybeJudge(
     // Deterministic offline mode: used by the test suite and by DEFERRED-COST items.
     const parsed = parseJudgeJson(mock);
     store.bump(`judge_calls:${e.sessionId}`);
-    store.recordJudgeSpend('mock', 'mock', 0, 0, 0, true);
+    store.recordJudgeSpend('mock', 'mock', 0, 0, 0, true, e.sessionId);
     return {
       ran: true, mocked: true, costUsd: 0, provider: 'mock', model: 'mock',
       ...(parsed && parsed.drift ? { verdict: driftVerdict(parsed) } : {}),
@@ -299,9 +540,18 @@ export async function maybeJudge(
   try {
     raw = await callProvider(cfg, SYSTEM_PROMPT, userBlock);
   } catch (err) {
+    const detail = (err as Error).message;
+    // An AUTH failure is the provider answering "is this key valid". It is NOT an answer to
+    // "did you paste it twice", and that distinction cost an evening on 2026-08-20. When the
+    // rejection is an auth one, the shape diagnosis is attached to it - computed from coarse
+    // properties only, never from the value.
+    const shape = cfg.metered && /\bAUTH\b/.test(detail)
+      ? inspectKeyShape(cfg.provider as MeteredProvider, cfg.apiKey)
+      : null;
+    const shapeNote = shape && !shape.ok ? ` ${shape.message}` : '';
     return {
       ran: false, mocked: false, costUsd: 0, provider: cfg.provider, model: cfg.model,
-      warning: `JUDGE_UNAVAILABLE: ${cfg.provider} judge call failed (${(err as Error).message}). FAILING OPEN. Layer 1 (deterministic) is still fully active; semantic drift detection is OFF for this event.`,
+      warning: `JUDGE_UNAVAILABLE: ${cfg.provider} judge call failed (${detail}).${shapeNote} FAILING OPEN. Layer 1 (deterministic) is still fully active; semantic drift detection is OFF for this event.`,
     };
   }
 
@@ -312,7 +562,7 @@ export async function maybeJudge(
   // returns 200 with unusable content has still been paid. Recording only on a parseable answer
   // would make the ledger under-report exactly when things are going wrong.
   store.bump(`judge_calls:${e.sessionId}`);
-  store.recordJudgeSpend(cfg.provider, cfg.model, raw.inTok, raw.outTok, cost, false);
+  store.recordJudgeSpend(cfg.provider, cfg.model, raw.inTok, raw.outTok, cost, false, e.sessionId);
 
   const stale = cfg.metered ? pricingStaleness(cfg.provider as MeteredProvider) : null;
   const parsed = parseJudgeJson(raw.text);

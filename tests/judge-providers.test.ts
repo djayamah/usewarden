@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import * as path from 'node:path';
 import { Store } from '../src/store.js';
 import {
-  callProvider, describeHttpFailure, maybeJudge, pricingAgeDays, pricingStaleness,
-  providerSpecs, selectProvider, PRICING_STALE_AFTER_DAYS,
+  callProvider, costPerCall, describeHttpFailure, inspectKeyShape, maybeJudge, modelOverrideWarning,
+  pricingAgeDays, pricingStaleness, providerSpecs, rankedProviders, selectProvider,
+  PRICING_STALE_AFTER_DAYS, REPRESENTATIVE_CALL,
   type MeteredProvider,
 } from '../src/engine/judge.js';
 import { defaultPolicy } from '../src/policy/schema.js';
@@ -552,7 +553,11 @@ describe('pricing provenance', () => {
   });
 
   test('prices go STALE rather than silently wrong', () => {
-    const now = Date.parse('2026-08-19T00:00:00Z');
+    // Derived from the provider's OWN pricedOn rather than a literal date. The literal version
+    // of this test broke the day the prices were re-checked, which is precisely the day it
+    // should have kept passing - a test that fails when the thing it guards is MAINTAINED
+    // teaches people to stop maintaining it.
+    const now = Date.parse(providerSpecs().openai.pricedOn + 'T00:00:00Z');
     assert.equal(pricingStaleness('openai', now), null, 'freshly checked prices must not warn');
     const later = now + (PRICING_STALE_AFTER_DAYS + 1) * 86_400_000;
     const warn = pricingStaleness('openai', later);
@@ -560,5 +565,238 @@ describe('pricing provenance', () => {
     assert.match(warn ?? '', /ESTIMATE/);
     assert.match(warn ?? '', /token counts are exact/);
     assert.match(warn ?? '', /https:\/\//, 'the warning must name where to re-check');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. SELECTION POLICY: cheapest-capable, not first-key-found
+//
+// Usewarden's judge spend lands on the USER's bill. When more than one key is present the
+// default has to be the one that costs them least, and - more importantly - that ordering has to
+// be DERIVED from the pricing table rather than written down beside it, because a hand-written
+// order is a second copy of the pricing information and the two drift.
+// ---------------------------------------------------------------------------
+describe('judge selection: cheapest-capable', () => {
+  const KEYS = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY'] as const;
+  const saved: Record<string, string | undefined> = {};
+  let sb: Sandbox;
+
+  beforeEach(() => {
+    sb = sandbox();
+    gitInit(sb.repo);
+    for (const k of KEYS) { saved[k] = process.env[k]; delete process.env[k]; }
+    // Without this the local CLI on PATH wins and no metered provider is ever selected.
+    process.env['USEWARDEN_JUDGE_NO_LOCAL'] = '1';
+  });
+  afterEach(() => {
+    for (const k of KEYS) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+    delete process.env['USEWARDEN_JUDGE_NO_LOCAL'];
+    sb.cleanup();
+  });
+
+  test('the representative call is the documented shape, not an invented average', () => {
+    assert.equal(REPRESENTATIVE_CALL.inTok, 500);
+    assert.equal(REPRESENTATIVE_CALL.outTok, 50);
+  });
+
+  test('cost per call is computed from the table, arithmetically', () => {
+    // gpt-5-mini at $0.25/$2.00: 500/1e6*0.25 + 50/1e6*2.00 = 0.000125 + 0.0001
+    assert.equal(Number(costPerCall({ inPer1M: 0.25, outPer1M: 2.00 }).toFixed(6)), 0.000225);
+    assert.equal(costPerCall({ inPer1M: 0, outPer1M: 0 }), 0);
+  });
+
+  test('the ranking really is ascending by cost, whatever the table says today', () => {
+    const ranked = rankedProviders();
+    assert.deepEqual([...ranked].sort(), ['anthropic', 'gemini', 'openai'],
+      'every metered provider must appear exactly once');
+    const costs = ranked.map((p) => costPerCall(providerSpecs()[p]));
+    for (let i = 1; i < costs.length; i++) {
+      assert.ok(costs[i]! >= costs[i - 1]!,
+        `ranking is not ascending: ${ranked.join(' -> ')} costs ${costs.join(', ')}`);
+    }
+  });
+
+  test('the cheapest provider with a key wins, even when a pricier key is also set', () => {
+    const ranked = rankedProviders();
+    const cheapest = ranked[0]!;
+    const dearest = ranked[ranked.length - 1]!;
+    assert.notEqual(cheapest, dearest, 'setup failed - the table has only one price');
+
+    // Set the DEAREST first, in the order the old hard-coded array used, to prove the array
+    // order is no longer what decides.
+    process.env[providerSpecs()[dearest].env] = 'test-key-not-real';
+    process.env[providerSpecs()[cheapest].env] = 'test-key-not-real';
+    const cfg = selectProvider(defaultPolicy(sb.repo));
+    assert.equal(cfg?.provider, cheapest,
+      `selected ${cfg?.provider} rather than the cheapest (${cheapest})`);
+  });
+
+  test('a lone key is used whatever it costs - cheapest never means "refuse the only option"', () => {
+    for (const p of ['anthropic', 'openai', 'gemini'] as const) {
+      for (const k of KEYS) delete process.env[k];
+      process.env[providerSpecs()[p].env] = 'test-key-not-real';
+      assert.equal(selectProvider(defaultPolicy(sb.repo))?.provider, p);
+    }
+  });
+
+  test('the order follows the PRICES, not the provider names', () => {
+    // A synthetic table proves the ordering function itself rather than today's figures: if the
+    // ranking were hard-coded, reversing the prices would not reverse the result.
+    const fake = { a: { inPer1M: 9, outPer1M: 9 }, b: { inPer1M: 1, outPer1M: 1 } };
+    const sorted = (Object.keys(fake) as (keyof typeof fake)[])
+      .sort((x, y) => costPerCall(fake[x]) - costPerCall(fake[y]));
+    assert.deepEqual(sorted, ['b', 'a']);
+    assert.ok(costPerCall(fake.b) < costPerCall(fake.a));
+  });
+
+  test('every ranked provider is priced, dated, and sourced - no unpriced tier can be chosen', () => {
+    for (const p of rankedProviders()) {
+      const spec = providerSpecs()[p];
+      assert.ok(spec.inPer1M > 0 && spec.outPer1M > 0, `${p} has no price and must not be rankable`);
+      assert.match(spec.pricedOn, /^\d{4}-\d{2}-\d{2}$/);
+      assert.match(spec.pricingSource, /^https:\/\//);
+    }
+  });
+
+  /**
+   * Overriding `judge.model` is supported and sometimes right - a cheaper tier, or a model id
+   * that rolled forward. What is not acceptable is usewarden silently pricing the model you
+   * chose at the rates of the model you did not.
+   */
+  test('a model override is honoured, flagged, and never silently mispriced', () => {
+    process.env['GEMINI_API_KEY'] = 'test-key-not-real';
+    const base = defaultPolicy(sb.repo);
+
+    const plain = selectProvider(base);
+    assert.equal(plain?.modelOverridden, false);
+    assert.equal(modelOverrideWarning(plain!), null, 'the default tier must not warn');
+
+    const overridden = selectProvider({ ...base, judge: { ...base.judge, model: 'gemini-3.5-flash-lite' } });
+    assert.equal(overridden?.model, 'gemini-3.5-flash-lite', 'the override must actually be used');
+    assert.equal(overridden?.modelOverridden, true);
+    const w = modelOverrideWarning(overridden!);
+    assert.match(w ?? '', /JUDGE_MODEL_OVERRIDDEN/);
+    assert.match(w ?? '', /gemini-3\.5-flash-lite/, 'the warning must name the model actually in use');
+    assert.match(w ?? '', /ESTIMATE/);
+    assert.match(w ?? '', /^(?=.*Token counts are exact)/s, 'the warning must say what is still trustworthy');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. CREDENTIAL SHAPE — both Gemini formats, and a 401 that explains itself
+//
+// Two separate defects motivate this block, both real, both found on 2026-08-20:
+//
+//   1. Google issues Gemini keys as `AQ.` + ~50 characters now, not the legacy `AIza` + 35.
+//      usewarden's redactor knew only the legacy shape, so a live key belonging to anyone who
+//      signed up that week passed through `redact()` untouched - into incident rows, onto the
+//      dashboard, and into the judge payload sent to a third party.
+//   2. A doubled paste produced a 106-character value and a bare `HTTP 401`. The provider was
+//      answering "is this key valid"; nothing was answering "did you paste it twice", and the
+//      difference was an evening.
+// ---------------------------------------------------------------------------
+describe('credential shape: both Gemini formats, and self-diagnosing failures', () => {
+  // Fabricated values with the right SHAPE. None is a real credential.
+  const GEMINI_CURRENT = 'AQ.Ab8RN6' + 'x'.repeat(44);          // AQ. + 50 = 53 chars
+  const GEMINI_LEGACY = 'AIzaSyD' + 'y'.repeat(32);             // AIza + 35 = 39 chars
+  const ANTHROPIC_KEY = 'sk-ant-api03-' + 'z'.repeat(40);
+  const OPENAI_KEY = 'sk-proj-' + 'w'.repeat(40);
+
+  test('BOTH Gemini key formats are accepted as well-shaped', () => {
+    assert.equal(GEMINI_CURRENT.length, 53, 'setup failed - the current-format fixture is the wrong length');
+    assert.equal(GEMINI_LEGACY.length, 39, 'setup failed - the legacy fixture is the wrong length');
+    for (const k of [GEMINI_CURRENT, GEMINI_LEGACY]) {
+      const r = inspectKeyShape('gemini', k);
+      assert.equal(r.ok, true, `a valid gemini key was rejected: ${r.code} - ${r.message}`);
+      assert.equal(r.code, 'ok');
+    }
+  });
+
+  test('the shape verdict names the format it matched, and never the value', () => {
+    for (const [k, expected] of [[GEMINI_CURRENT, 'AQ.'], [GEMINI_LEGACY, 'AIza']] as const) {
+      const r = inspectKeyShape('gemini', k);
+      assert.match(r.message, new RegExp(expected.replace('.', '\\.')));
+      assert.equal(r.message.includes(k), false, 'the verdict leaked the key');
+      assert.equal(r.message.includes(k.slice(8)), false, 'the verdict leaked part of the key');
+    }
+  });
+
+  // --- SABOTAGE: the three ways a paste goes wrong -------------------------------------
+  test('SABOTAGE doubled: the same key pasted twice is named as doubled, not as invalid', () => {
+    const doubled = GEMINI_CURRENT + GEMINI_CURRENT;
+    // sabotage landed: this really is 106 characters, the exact 2026-08-20 shape.
+    assert.equal(doubled.length, 106, 'setup failed - not the doubled length that caused the incident');
+
+    const r = inspectKeyShape('gemini', doubled);
+    assert.equal(r.ok, false);
+    assert.equal(r.code, 'doubled', `a doubled paste was reported as ${r.code}`);
+    assert.match(r.message, /pasted TWICE/);
+    assert.match(r.message, /106 characters/, 'the length is a coarse property and belongs in the message');
+    assert.equal(r.message.includes(GEMINI_CURRENT), false, 'the verdict leaked the key');
+  });
+
+  test('SABOTAGE doubled, halves not identical: caught by prefix count', () => {
+    const doubled = GEMINI_CURRENT + GEMINI_LEGACY;   // two different keys concatenated
+    const r = inspectKeyShape('gemini', doubled);
+    assert.equal(r.ok, false);
+    assert.equal(r.code, 'doubled');
+    assert.match(r.message, /more than one key/);
+  });
+
+  test('SABOTAGE truncated: a half-pasted key is not reported as a valid one', () => {
+    for (const truncated of [GEMINI_CURRENT.slice(0, 20), GEMINI_LEGACY.slice(0, 25)]) {
+      const r = inspectKeyShape('gemini', truncated);
+      assert.equal(r.ok, false, `a truncated key passed as valid: ${truncated.length} chars`);
+    }
+    const veryShort = inspectKeyShape('gemini', 'AQ.abc');
+    assert.equal(veryShort.code, 'too_short');
+    assert.match(veryShort.message, /too short to be an API key/);
+  });
+
+  test('SABOTAGE wrong provider: the message says which provider it belongs to', () => {
+    const r = inspectKeyShape('gemini', ANTHROPIC_KEY);
+    assert.equal(r.code, 'wrong_provider');
+    assert.match(r.message, /anthropic key, not a gemini one/);
+    assert.match(r.message, /GEMINI_API_KEY/, 'it must name the variable holding the wrong thing');
+
+    const other = inspectKeyShape('openai', GEMINI_CURRENT);
+    assert.equal(other.code, 'wrong_provider');
+    assert.match(other.message, /gemini key, not a openai one/);
+
+    const third = inspectKeyShape('anthropic', OPENAI_KEY);
+    assert.equal(third.code, 'wrong_provider');
+  });
+
+  test('SABOTAGE whitespace: a paste that caught a newline is named as such', () => {
+    for (const k of [GEMINI_CURRENT + '\n', ' ' + GEMINI_CURRENT, GEMINI_CURRENT + ' ']) {
+      const r = inspectKeyShape('gemini', k);
+      assert.equal(r.code, 'whitespace', `whitespace variant reported as ${r.code}`);
+      assert.match(r.message, /whitespace/);
+    }
+  });
+
+  test('an UNRECOGNISED format warns but never refuses - vendors change formats without notice', () => {
+    const future = 'ZZ9.someFutureFormat' + 'q'.repeat(30);
+    const r = inspectKeyShape('gemini', future);
+    assert.equal(r.ok, false);
+    assert.equal(r.code, 'unknown_format');
+    assert.match(r.message, /will still try the call/,
+      'refusing an unknown shape would have locked out every AQ. key holder before we knew the format');
+    assert.match(r.message, /aistudio\.google\.com/, 'it must say where a correct key comes from');
+  });
+
+  test('NO shape verdict, for any input, can contain the value', () => {
+    const inputs = [GEMINI_CURRENT, GEMINI_LEGACY, ANTHROPIC_KEY, OPENAI_KEY,
+      GEMINI_CURRENT + GEMINI_CURRENT, GEMINI_CURRENT.slice(0, 20), GEMINI_CURRENT + '\n', 'short'];
+    for (const provider of ['gemini', 'openai', 'anthropic'] as const) {
+      for (const k of inputs) {
+        const msg = inspectKeyShape(provider, k).message;
+        const body = k.trim().replace(/^(AQ\.|AIza|sk-ant-|sk-proj-|sk-)/, '');
+        if (body.length >= 8) {
+          assert.equal(msg.includes(body), false,
+            `${provider} verdict leaked the credential body for a ${k.length}-char input`);
+        }
+      }
+    }
   });
 });

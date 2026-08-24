@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { AgentId, ProtectionState } from './types.js';
 import type { Store } from './store.js';
+import { buildMetrics, type Metrics } from './metrics.js';
 import { detectAllScopes } from './install/detect.js';
 import { extractUsewardenEntries, integrityHash, nodePath, usewardenScriptPath } from './install/installer.js';
 import { planFor, USEWARDEN_TAG } from './install/entries.js';
@@ -52,6 +53,12 @@ export interface StatusReport {
   checklist: { step: string; done: boolean; label: string }[];
   liveCatches: number;
   totalCatches: number;
+  /**
+   * Every reported number, derived per origin. `counters` above is the RAW monotonic ledger and
+   * is kept only for debugging - reading a headline figure from it is what produced the
+   * inflation recorded in verification/metrics-inflation-before.txt. See src/metrics.ts.
+   */
+  metrics: Metrics;
   judge: { calls: number; mocked: number; unmetered: number; usd: number };
   usewardenHome: string;
 }
@@ -104,6 +111,18 @@ export function buildStatus(store: Store, cwd: string): StatusReport {
     const hashMatches = rec ? rec.hash === hash : false;
     const disabled = hooksGloballyDisabled(d.configPath);
     const pointsAtUsewarden = d.agent === 'opencode' ? registered : commandPointsAtUsewarden(entries, bin);
+    // Registered paths that are not on disk. Only meaningful when the command does not match:
+    // it separates "usewarden moved" from "someone swapped the payload".
+    // A stale path is only treated as benign when it POSITIVELY LOOKS LIKE a usewarden install
+    // that has gone away - same script filename, and a `usewarden` directory segment on the way
+    // to it. `/tmp/evil-payload.js` does not qualify and stays TAMPERED.
+    //
+    // This discriminator is the whole reason the softer message is safe to show. Without it the
+    // rule would read "any path that does not exist is benign", which hands an attacker a way to
+    // downgrade the alarm by pointing the entry somewhere they have not created yet.
+    const staleScripts = pointsAtUsewarden
+      ? []
+      : registeredScriptPaths(entries).filter((p) => !fs.existsSync(p) && looksLikeUsewardenScript(p, bin));
 
     let state: ProtectionState;
     let detail: string;
@@ -116,6 +135,13 @@ export function buildStatus(store: Store, cwd: string): StatusReport {
     } else if (disabled) {
       state = 'UNPROTECTED';
       detail = `"disableAllHooks": true is set in ${d.configPath}. Every hook, including usewarden's, is switched off.`;
+    } else if (!pointsAtUsewarden && staleScripts.length > 0) {
+      // The registered file is not on disk. Nothing is executing, so nothing was substituted -
+      // usewarden moved. UNPROTECTED is the accurate state and re-registering is the whole fix.
+      state = 'UNPROTECTED';
+      detail = `usewarden is registered in ${d.configPath} at ${staleScripts[0]}, which no longer `
+        + 'exists - usewarden was moved, reinstalled, or its node_modules was deleted. The hook '
+        + 'cannot run, so you are NOT protected. Run: usewarden init';
     } else if (!pointsAtUsewarden) {
       state = 'TAMPERED';
       detail = `a hook entry tagged as usewarden's does NOT invoke ${bin}. Something rewrote it. Inspect ${d.configPath} immediately.`;
@@ -189,6 +215,7 @@ export function buildStatus(store: Store, cwd: string): StatusReport {
     checklist: store.checklist().map((c) => ({ step: c.step, done: c.done, label: CHECKLIST_LABELS[c.step] ?? c.step })),
     liveCatches: store.countLiveIncidents(),
     totalCatches: store.countIncidents(),
+    metrics: buildMetrics(store),
     judge: { calls: spend.calls, mocked: spend.mocked, unmetered: spend.unmetered, usd: spend.usd },
     usewardenHome: usewardenHome(),
   };
@@ -210,6 +237,59 @@ function hooksGloballyDisabled(configPath: string): boolean {
  * This is the check that catches the nastiest tamper: an attacker keeps the `_usewarden: true` tag
  * (so the entry still looks like ours) but swaps the command for their own payload.
  */
+/**
+ * The script paths the REGISTERED entries actually invoke, whatever they are.
+ *
+ * Needed to tell two very different situations apart. Both make `commandPointsAtUsewarden`
+ * false, and before this they produced the same alarming message:
+ *
+ *   - the registered path DOES NOT EXIST. usewarden moved: a local `node_modules` install was
+ *     replaced by a global one, or `node_modules` was deleted, or the project directory was.
+ *     Nothing rewrote anything and nothing is executing. The user is UNPROTECTED and the fix is
+ *     one command.
+ *   - the registered path EXISTS and is something else. That is the nasty tamper this check was
+ *     written for - an attacker keeping the `_usewarden: true` tag and swapping the payload.
+ *
+ * Telling a user who ran `npm install -g usewarden` that "something rewrote it, inspect
+ * immediately" is a false alarm, and false alarms are how a security tool teaches people to
+ * ignore it.
+ */
+/**
+ * Does this path look like a usewarden CLI that is simply not there any more?
+ *
+ * Same script filename as our own, and a path segment literally named `usewarden` - which every
+ * npm install layout produces, local (`node_modules/usewarden/dist/src/cli.js`) and global
+ * (`lib/node_modules/usewarden/dist/src/cli.js`) alike. Deliberately strict: this is what decides
+ * whether a mismatch is reported as "it moved" or as "someone rewrote it", and the cost of being
+ * wrong in the lenient direction is a muted alarm.
+ */
+function looksLikeUsewardenScript(candidate: string, ownScript: string): boolean {
+  if (path.basename(candidate) !== path.basename(ownScript)) return false;
+  return candidate.split(path.sep).includes('usewarden');
+}
+
+function registeredScriptPaths(entries: unknown): string[] {
+  const out: string[] = [];
+  const visit = (v: unknown): void => {
+    if (Array.isArray(v)) { v.forEach(visit); return; }
+    if (typeof v !== 'object' || v === null) return;
+    const o = v as Record<string, unknown>;
+    if (typeof o['command'] === 'string') {
+      const args = Array.isArray(o['args']) ? o['args'] as unknown[] : null;
+      if (args && typeof args[0] === 'string') {
+        out.push(args[0]);
+      } else {
+        // Command-string form (Cursor): '<node>' '<script>' hook ...
+        const m = /^'[^']*'\s+'([^']*)'/.exec(o['command']);
+        if (m?.[1]) out.push(m[1]);
+      }
+    }
+    for (const val of Object.values(o)) visit(val);
+  };
+  visit(entries);
+  return [...new Set(out)];
+}
+
 function commandPointsAtUsewarden(entries: unknown, script: string): boolean {
   const node = nodePath();
   let sawCommand = false;

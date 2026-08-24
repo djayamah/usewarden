@@ -59,6 +59,9 @@ export async function runDemo(json: boolean): Promise<number> {
   fs.writeFileSync(path.join(sibling, '.git', 'HEAD'), 'ref: refs/heads/main\n');
 
   const store = new Store();
+  // One session id per run. The demo used to reuse a constant id, which made consecutive runs
+  // dedupe against each other and report fewer events than it had actually evaluated.
+  const sessionId = `usewarden-demo-${Date.now()}`;
   const results: { scenario: string; decision: string; rule?: string; reason: string }[] = [];
   try {
     // The demo evaluates against usewarden's REAL policy where one exists, falling back to the
@@ -76,10 +79,13 @@ export async function runDemo(json: boolean): Promise<number> {
 
     for (const s of SCENARIOS) {
       const ev: NormalizedEvent = {
-        agent: 'claude', event: 'pre_tool', sessionId: 'usewarden-demo',
+        agent: 'claude', event: 'pre_tool', sessionId,
         cwd: fixture, ts: Date.now(), ...s.event(fixture),
       } as NormalizedEvent;
-      const r = await handleEvent(store, ev, { live: false, loaded, noJudge: true });
+      // origin: 'demo' is what keeps this out of every headline figure. `live: false` alone was
+      // not enough - before schema v2 the demo still bumped the same counters `usewarden status`
+      // read from, so three demo runs on a clean install reported twelve blocked actions.
+      const r = await handleEvent(store, ev, { live: false, origin: 'demo', loaded, noJudge: true });
       results.push({
         scenario: s.name,
         decision: r.verdict.decision,
@@ -87,7 +93,7 @@ export async function runDemo(json: boolean): Promise<number> {
         reason: r.verdict.reason,
       });
       if (!json) {
-        const rows = store.recentIncidents(1);
+        const rows = store.incidentsByOrigin('demo', 1);
         if (r.verdict.decision === 'deny' && rows[0]) {
           process.stdout.write(indent(incidentCard(rows[0])) + '\n\n');
         } else {

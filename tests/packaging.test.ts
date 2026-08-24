@@ -6,7 +6,7 @@ import * as os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { Store } from '../src/store.js';
-import { buildPayload, endpoint, isSafeLabel, record, telemetryEnabled } from '../src/telemetry.js';
+import { buildPayload, endpoint, isSafeLabel, record, telemetryEnabled, grantConsent } from '../src/telemetry.js';
 import { sandbox, type Sandbox } from './helpers.js';
 import { displayPath, isInside } from '../src/util.js';
 
@@ -115,14 +115,14 @@ describe('T-15: telemetry', () => {
   });
 
   test('DO_NOT_TRACK=1 overrides an explicit opt-in', () => {
-    store.setMeta('telemetry', 'on');
+    store.setMeta('telemetry', 'on'); grantConsent('0.1.0');
     assert.equal(telemetryEnabled(store), true);
     process.env['DO_NOT_TRACK'] = '1';
     assert.equal(telemetryEnabled(store), false);
   });
 
   test('USEWARDEN_TELEMETRY=0 overrides an explicit opt-in', () => {
-    store.setMeta('telemetry', 'on');
+    store.setMeta('telemetry', 'on'); grantConsent('0.1.0');
     process.env['USEWARDEN_TELEMETRY'] = '0';
     assert.equal(telemetryEnabled(store), false);
   });

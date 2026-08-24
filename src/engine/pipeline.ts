@@ -1,4 +1,5 @@
-import type { Incident, NormalizedEvent, Verdict } from '../types.js';
+import * as path from 'node:path';
+import type { Incident, IncidentOrigin, NormalizedEvent, Verdict } from '../types.js';
 import { ALLOW } from '../types.js';
 import type { Store } from '../store.js';
 import { loadPolicy, type LoadedPolicy } from '../policy/load.js';
@@ -6,6 +7,7 @@ import { currentBranch, describeAttempt, evaluateLayer1 } from './layer1.js';
 import { findRepoRoot } from '../policy/load.js';
 import { oneLine, redact } from '../util.js';
 import { maybeJudge, type JudgeOutcome } from './judge.js';
+import { loadExceptions } from '../exceptions.js';
 import { dispatchJudge } from './detached.js';
 import { applyInterventions, type InterventionResult } from './interventions.js';
 
@@ -21,6 +23,12 @@ export interface HandleResult {
 export interface HandleOptions {
   /** Marks the incident as originating from a real agent session rather than a fixture. */
   live: boolean;
+  /**
+   * Finer-grained provenance than `live`, and the axis every reported metric is grouped by.
+   * Defaults to `live ? 'live' : 'fixture'`; `usewarden demo` passes 'demo' so its incidents can
+   * never reach a headline figure. See src/metrics.ts and docs/METRICS.md.
+   */
+  origin?: IncidentOrigin;
   /** Pre-loaded policy, so a caller evaluating many events pays the load cost once. */
   loaded?: LoadedPolicy;
   /** Disable the Layer-2 judge for this call regardless of policy (used by tests). */
@@ -43,29 +51,43 @@ export async function handleEvent(
   opts: HandleOptions,
 ): Promise<HandleResult> {
   const warnings: string[] = [];
+  const origin: IncidentOrigin = opts.origin ?? (opts.live ? 'live' : 'fixture');
   const loaded = opts.loaded ?? loadPolicy(e.cwd);
   const policy = loaded.policy;
   for (const n of loaded.notices) warnings.push(`${n.code}: ${n.detail}`);
 
   const repoRoot = findRepoRoot(e.cwd) ?? undefined;
-  store.upsertSession(e.sessionId, e.agent, e.cwd, e.ts);
+  store.upsertSession(e.sessionId, e.agent, e.cwd, e.ts, origin);
   if (e.event === 'session_end') store.endSession(e.sessionId, e.ts);
   if (e.event === 'user_prompt' && e.prompt && !store.getGoal(e.sessionId)) {
     store.setGoal(e.sessionId, redact(e.prompt).slice(0, 2000));
   }
 
   const target = e.filePath ?? e.command ?? '';
-  const fresh = store.recordEvent(e, target);
+  // ASKED BEFORE THE EVENT IS RECORDED, on purpose: a moment later this write is in the events
+  // table and would answer "yes, the agent already wrote this file" about itself.
+  const agentAuthored = e.filePath !== undefined
+    && store.sessionHasWrittenTo(e.sessionId, [e.filePath, path.resolve(e.cwd, e.filePath)]);
+  const fresh = store.recordEvent(e, target, origin);
 
   const branch = currentBranch(e.cwd);
-  const ctx = { policy, ...(branch ? { branch } : {}), ...(repoRoot ? { repoRoot } : {}) };
+  // Read fresh on every event: an exception granted mid-session must take effect on the very next
+  // tool call, and one that expires mid-session must stop applying at the same granularity.
+  const exceptions = loadExceptions();
+  const ctx = {
+    policy,
+    ...(branch ? { branch } : {}),
+    ...(repoRoot ? { repoRoot } : {}),
+    ...(agentAuthored ? { agentAuthored } : {}),
+    ...(exceptions.length > 0 ? { exceptions } : {}),
+  };
   const verdict = evaluateLayer1(e, ctx);
 
   let incidentId: number | undefined;
   const interventions: InterventionResult[] = [];
 
   if (verdict.severity !== 'info') {
-    incidentId = record(store, e, verdict, opts.live);
+    incidentId = record(store, e, verdict, opts.live, origin);
     interventions.push(...applyInterventions(verdict, e, policy, repoRoot));
   }
 
@@ -93,7 +115,7 @@ export async function handleEvent(
     judge = await maybeJudge(store, e, policy, verdict);
     if (judge.warning) warnings.push(judge.warning);
     if (judge.verdict && judge.verdict.severity !== 'info' && verdict.decision !== 'deny') {
-      const jid = record(store, e, judge.verdict, opts.live);
+      const jid = record(store, e, judge.verdict, opts.live, origin);
       if (incidentId === undefined) incidentId = jid;
       // Layer 2 never blocks on its own - it warns. Escalating a sampled, fallible, prompt-
       // injectable signal into a hard block is how a guardian becomes unusable.
@@ -115,11 +137,11 @@ export async function handleEvent(
 }
 
 /** Records a Layer-2 finding produced out of band by the detached judge. */
-export function recordJudgeFinding(store: Store, e: NormalizedEvent, v: Verdict, live: boolean): number {
-  return record(store, e, v, live);
+export function recordJudgeFinding(store: Store, e: NormalizedEvent, v: Verdict, live: boolean, origin?: IncidentOrigin): number {
+  return record(store, e, v, live, origin);
 }
 
-function record(store: Store, e: NormalizedEvent, v: Verdict, live: boolean): number {
+function record(store: Store, e: NormalizedEvent, v: Verdict, live: boolean, origin?: IncidentOrigin): number {
   const inc: Incident = {
     sessionId: e.sessionId,
     agent: e.agent,
@@ -135,14 +157,20 @@ function record(store: Store, e: NormalizedEvent, v: Verdict, live: boolean): nu
     target: oneLine(redact(e.filePath ?? e.command ?? '')),
     cwd: e.cwd,
   };
-  return store.addIncident(inc, live);
+  return store.addIncident(inc, live, origin);
 }
 
 function titleFor(v: Verdict, e: NormalizedEvent): string {
+  // FIRST, because every branch below says "Blocked" and a waived action was not blocked.
+  // The first version of this checked the waiver LAST, so a card that let a .env read through
+  // was titled "Blocked access to protected credentials" - the incident wall claiming a catch it
+  // did not make, which is the metrics-inflation failure this project already fixed once (D-069).
+  if (v.reason.includes('WAIVED by')) return 'Waived by an explicit human exception';
   if (v.layer === 2) return 'Drift from the declared goal';
   const id = v.rule ?? '';
   if (id.startsWith('scope.forbidden_paths')) return 'Blocked access to protected credentials';
   if (id.startsWith('scope.allowed_paths')) return 'Blocked write outside session scope';
+  if (id.startsWith('scope.protect_uncommitted')) return 'Blocked overwrite of work git cannot restore';
   if (id.startsWith('context.')) return 'Context window filling up';
   const m = /\((.+)\)/.exec(id);
   if (m) return `Blocked command: ${m[1]}`;

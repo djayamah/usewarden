@@ -275,6 +275,49 @@ describe('status states', () => {
     store.close();
   });
 
+  test('a MOVED install is UNPROTECTED with a fix, not TAMPERED with an alarm', () => {
+    // Found by walking a first-install as a stranger would. Installing locally, running init,
+    // then installing globally (or just deleting node_modules) leaves the registered path
+    // pointing at a file that no longer exists. usewarden reported TAMPERED and said
+    // "Something rewrote it. Inspect immediately." Nothing had rewritten anything, and nothing
+    // was executing. A security tool that cries wolf at `npm install -g` teaches people to
+    // ignore it, and this is a path an ordinary user takes on purpose.
+    const store = initialized();
+    const cfg = readJsonFile(claudeSettings);
+    const moved = path.join(sb.root, 'gone', 'node_modules', 'usewarden', 'dist', 'src', 'cli.js');
+    const raw = fs.readFileSync(claudeSettings, 'utf8').split(usewardenScriptPath()).join(moved);
+    fs.writeFileSync(claudeSettings, raw);
+    // LANDED: the entry really points somewhere else, and that somewhere really is absent.
+    assert.match(fs.readFileSync(claudeSettings, 'utf8'), /gone/);
+    assert.equal(fs.existsSync(moved), false);
+    assert.notEqual(extractUsewardenEntries(claudeSettings, 'claude'), null, 'the tag survived');
+    assert.ok(cfg);
+
+    const r = buildStatus(store, sb.repo);
+    assert.equal(r.agents[0]!.state, 'UNPROTECTED');
+    assert.equal(r.overall, 'UNPROTECTED');
+    assert.match(r.agents[0]!.detail, /no longer exists/);
+    assert.match(r.agents[0]!.detail, /usewarden init/);
+    assert.equal(/Something rewrote it/.test(r.agents[0]!.detail), false,
+      'a moved install must not be reported as a rewrite');
+    store.close();
+  });
+
+  test('an ABSENT path that does NOT look like usewarden is still TAMPERED', () => {
+    // The discriminator that makes the softer message above safe. Without it, "any path that is
+    // not on disk is benign" would hand an attacker a way to mute the alarm by pointing the
+    // entry at a file they have not created yet.
+    const store = initialized();
+    const raw = fs.readFileSync(claudeSettings, 'utf8')
+      .split(usewardenScriptPath()).join('/tmp/not-created-yet.js');
+    fs.writeFileSync(claudeSettings, raw);
+    assert.equal(fs.existsSync('/tmp/not-created-yet.js'), false, 'setup: the path really is absent');
+    const r = buildStatus(store, sb.repo);
+    assert.equal(r.agents[0]!.state, 'TAMPERED');
+    assert.match(r.agents[0]!.detail, /Something rewrote it/);
+    store.close();
+  });
+
   test('disableAllHooks -> UNPROTECTED even though the entries are intact', () => {
     const store = initialized();
     const f = readJsonFile(claudeSettings);

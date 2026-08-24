@@ -150,7 +150,19 @@ export function matchesAnyGlob(p: string, globs: readonly string[], base: string
   return false;
 }
 
-/** Redact anything that looks like a credential before it is logged, stored, or judged. */
+/**
+ * Redact anything that looks like a credential before it is logged, stored, or judged.
+ *
+ * This runs on every incident row, every judge payload, and every log line, so a gap here is a
+ * credential in a database, on a dashboard, or in a third party's model context.
+ *
+ * TWO MECHANISMS, on purpose. Pattern matching alone was not enough and this repository has the
+ * scar to prove it: on 2026-08-20 Google was found to be issuing Gemini keys in a NEW format -
+ * `AQ.` plus 50 characters - and the pattern list only knew the legacy `AIza` shape, so a live
+ * key from a user who signed up that week passed straight through untouched. Google publishes no
+ * key-format specification, so any list of prefixes is a guess with a shelf life. Adding `AQ.`
+ * and stopping would repeat exactly the mistake D-081 records for the .env reader denylist.
+ */
 const SECRET_PATTERNS: readonly RegExp[] = [
   /\bsk-ant-[A-Za-z0-9_-]{8,}/g,
   /\bsk-[A-Za-z0-9_-]{16,}/g,
@@ -158,14 +170,51 @@ const SECRET_PATTERNS: readonly RegExp[] = [
   /\bgithub_pat_[A-Za-z0-9_]{20,}/g,
   /\bnpm_[A-Za-z0-9]{20,}/g,
   /\bAKIA[0-9A-Z]{16}\b/g,
+  // Google, legacy: AIza + 35. Google, current: AQ. + ~50. Both are in the wild simultaneously -
+  // an existing key keeps working while new ones are issued in the new shape.
   /\bAIza[0-9A-Za-z_-]{30,}\b/g,
+  /\bAQ\.[A-Za-z0-9_-]{20,}/g,
   /\bxox[baprs]-[A-Za-z0-9-]{10,}/g,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
   /\b[A-Z_][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)\s*=\s*\S+/g,
 ];
 
-export function redact(text: string): string {
+/** Environment variables whose VALUE is a live credential on this machine. */
+const CREDENTIAL_ENV_VARS = [
+  'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY',
+  'GOOGLE_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
+] as const;
+
+/** Shortest string treated as a credential. Below this, an exact-match strip would be reckless. */
+const MIN_CREDENTIAL_LEN = 16;
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Strips the EXACT value of any credential this process was configured with.
+ *
+ * Redaction by identity rather than by shape. It cannot be defeated by a vendor changing its key
+ * format, because it never assumes one: if the key is in the environment, usewarden already
+ * knows the precise string to remove, whatever it looks like. That makes it the backstop the
+ * pattern list is not - the `AQ.` miss above would have been caught by this even with no pattern
+ * for it at all.
+ *
+ * It only ever REMOVES. There is no path here that writes, logs, or returns a key.
+ */
+export function redactConfiguredSecrets(text: string): string {
   let out = text;
+  for (const name of CREDENTIAL_ENV_VARS) {
+    const value = process.env[name]?.trim();
+    if (!value || value.length < MIN_CREDENTIAL_LEN) continue;
+    out = out.replace(new RegExp(escapeRegExp(value), 'g'), '[REDACTED]');
+  }
+  return out;
+}
+
+export function redact(text: string): string {
+  let out = redactConfiguredSecrets(text);
   for (const re of SECRET_PATTERNS) out = out.replace(re, '[REDACTED]');
   return out;
 }
