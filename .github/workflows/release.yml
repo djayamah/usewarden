@@ -156,10 +156,39 @@ jobs:
       # provenance badge on npmjs.com after approval, precisely because that is unverified here.
       - name: Stage for manual approval (this workflow never publishes)
         if: ${{ inputs.mode == 'stage' }}
-        run: npm stage publish --provenance --access public
+        run: |
+          set -o pipefail
+          npm stage publish --provenance --access public 2>&1 | tee /tmp/stage.out
+          # The id is printed as `+ pkg@version (staged with id <uuid>)`. Captured here because
+          # this step is the only thing that knows it without authenticating to the registry, and
+          # the next step must not have to ask for something it cannot read. `|| true` on the grep:
+          # a missing id must not fail a stage that succeeded.
+          STAGE_LINE="$(grep -Eo '\(staged with id [0-9a-f-]+\)' /tmp/stage.out | tail -1 || true)"
+          echo "STAGE_LINE=${STAGE_LINE}" >> "$GITHUB_ENV"
+          STAGE_ID="$(printf '%s' "$STAGE_LINE" | grep -Eo '[0-9a-f-]{36}' || true)"
+          echo "STAGE_ID=${STAGE_ID}" >> "$GITHUB_ENV"
+          [ -n "$STAGE_ID" ] && echo "::notice::Stage id ${STAGE_ID}" || true
 
+      # THIS STEP MUST NOT BE ABLE TO FAIL THE RUN, AND IT COULD.
+      #
+      # `npm stage list` is a registry READ, and a read needs a user token. OIDC trusted publishing
+      # authorises the STAGE without one — that is the entire point, there is no npm token anywhere
+      # — but it does not authorise arbitrary reads. So this purely informational step exited 1 with
+      # E401 on 2026-08-24, on a run whose `npm stage publish` had SUCCEEDED, and the run went red.
+      #
+      # A successful release reporting as a failed workflow is worse than a cosmetic annoyance.
+      # CLAUDE.md §4.5 says a halt must never resemble a completion; this is the inverse, and it is
+      # just as bad, because an operator who sees red on every successful release learns to ignore
+      # red — and then cannot tell the one genuine failure apart from the noise.
+      #
+      # So: `|| true`, and the stage id is read out of the step that actually knows it rather than
+      # asked of a registry we cannot authenticate to. `npm stage publish` prints
+      # `+ pkg@version (staged with id <uuid>)`, which is captured above and echoed here.
       - name: Show what is now waiting for a human
         if: ${{ inputs.mode == 'stage' }}
         run: |
-          npm stage list
+          echo "Staged, awaiting human approval:"
+          echo "  ${STAGE_LINE:-(see the 'Stage for manual approval' step for the id)}"
+          # Best-effort, and explicitly allowed to fail: it needs a user token that does not exist.
+          npm stage list || echo "  (npm stage list needs a user token; there is none, by design)"
           echo "::notice::Nothing is installable yet. Approve it on npmjs.com under Staged Packages, with your security key."
