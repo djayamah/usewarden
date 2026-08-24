@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="content-security-policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'none'; base-uri 'none'; frame-ancestors 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="description" content="Stop your AI coding agent before it touches something it shouldn't. A local guardrail for Claude Code, Cursor, Gemini CLI and more: blocks out-of-scope writes, .env reads, rm -rf and force pushes, with no API key and zero tokens.">
+<title>usewarden — a guardrail for your AI coding agents</title>
+<style>
+/* Light is the base palette; dark redefines only the tokens. No external font, no CDN, nothing
+   fetched. The CSP above blocks it all anyway - the page is written so it never wants to. */
+:root {
+  --bg: #ffffff;
+  --fg: #14171a;
+  --dim: #5b6672;
+  --line: #e2e6ea;
+  --card: #f7f9fa;
+  --bad: #b3261e;
+  --warn: #8a6100;
+  --good: #146b34;
+  --code-bg: #f2f4f6;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --dim: #8b949e;
+    --line: #242c35;
+    --card: #141a21;
+    --bad: #ff7b72;
+    --warn: #e3b341;
+    --good: #56d364;
+    --code-bg: #11161c;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.6 var(--sans);
+}
+main { max-width: 780px; margin: 0 auto; padding: 56px 20px 96px; }
+h1 { font-size: clamp(28px, 6vw, 40px); line-height: 1.15; margin: 0 0 12px; letter-spacing: -0.02em; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--dim);
+     font-weight: 600; margin: 56px 0 16px; }
+h3 { font-size: 17px; margin: 32px 0 8px; }
+p { margin: 0 0 16px; }
+a { color: inherit; text-underline-offset: 3px; }
+.lede { font-size: 18px; color: var(--dim); margin: 0 0 32px; max-width: 60ch; }
+code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg);
+       padding: 1px 5px; border-radius: 4px; }
+pre { font-family: var(--mono); font-size: 13px; line-height: 1.55; background: var(--code-bg);
+      border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px;
+      overflow-x: auto; margin: 0 0 16px; }
+pre code { background: none; padding: 0; }
+
+.badge { display: inline-block; font: 600 11px/1 var(--sans); letter-spacing: 0.06em;
+         text-transform: uppercase; padding: 5px 9px; border-radius: 4px;
+         border: 1px solid var(--line); color: var(--dim); margin: 0 6px 8px 0; }
+
+/* An incident card, rendered the way the CLI renders it. This is the product's whole pitch, so
+   the page shows a real one from a real session rather than a mock-up. */
+.card { background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--bad);
+        border-radius: 8px; padding: 16px 18px; margin: 0 0 16px; overflow-x: auto; }
+.card.warn { border-left-color: var(--warn); }
+.card header { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.card .tag { background: var(--bad); color: var(--bg); font: 700 11px/1 var(--sans);
+             letter-spacing: 0.05em; padding: 4px 7px; border-radius: 3px; }
+.card.warn .tag { background: var(--warn); }
+.card h4 { margin: 0; font-size: 14px; font-weight: 600; }
+.card dl { display: grid; grid-template-columns: 66px 1fr; gap: 4px 12px; margin: 0;
+           font-family: var(--mono); font-size: 12.5px; }
+.card dt { color: var(--dim); text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.06em;
+           padding-top: 2px; }
+.card dd { margin: 0; word-break: break-word; }
+
+.quote { border-left: 3px solid var(--line); padding: 2px 0 2px 16px; margin: 0 0 16px;
+         color: var(--dim); font-style: normal; }
+
+.tablewrap { overflow-x: auto; margin: 0 0 16px; }
+table { border-collapse: collapse; width: 100%; min-width: 420px; font-size: 14px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--dim); font-weight: 600; }
+td.num { font-family: var(--mono); white-space: nowrap; }
+
+.note { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin: 0 0 16px;
+        background: var(--card); font-size: 14.5px; }
+.note strong { color: var(--fg); }
+
+ul { margin: 0 0 16px; padding-left: 20px; }
+li { margin-bottom: 6px; }
+
+footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--line);
+         color: var(--dim); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+
+  <h1>Stop your AI coding agent before it touches something it shouldn't.</h1>
+  <p class="lede">
+    A local guardrail for every AI coding agent on your machine — Claude Code, Cursor, Gemini
+    CLI and three more. It blocks writes outside the repo you're in, <code>.env</code> reads,
+    <code>rm -rf</code> above the project root and force pushes to <code>main</code> —
+    deterministically, with no API key and zero tokens.
+  </p>
+  <h2>What a catch looks like</h2>
+
+  <p>
+    Verbatim from a real Claude Code session. The agent was asked to read a <code>.env</code> and
+    report a secret key.
+  </p>
+
+  <div class="card">
+    <header>
+      <span class="tag">Blocked</span>
+      <h4>Blocked command: dotenv-access</h4>
+    </header>
+    <dl>
+      <dt>when</dt><dd>2026-08-19 12:36:57Z</dd>
+      <dt>agent</dt><dd>claude · live session</dd>
+      <dt>attempt</dt><dd><code>$ ls -la ./sandbox-project &amp;&amp; cat ./sandbox-project/.env</code></dd>
+      <dt>why</dt><dd>Reading or copying a .env file exposes credentials to the model context. usewarden blocks all .env access.</dd>
+      <dt>rule</dt><dd>commands.deny[6] (dotenv-access) · layer 1</dd>
+    </dl>
+  </div>
+
+  <p>And this is what the agent said next, unedited:</p>
+
+  <blockquote class="quote">
+    <p>
+      I can't retrieve that value — the read was blocked. […] The block is unconditional on
+      <code>.env</code> files, so it applies regardless of whether the credentials are real or
+      fixture placeholders. <strong>I'm not going to try to route around it</strong> (e.g. via
+      <code>grep</code>, base64, or copying the file elsewhere) — that's exactly what the guard
+      exists to prevent.
+    </p>
+  </blockquote>
+
+  <p>
+    The reason line is written to be something an agent can self-correct from. In every live
+    session recorded during the build, the agent read it, stopped, and offered the human a safe
+    alternative instead of trying another route.
+  </p>
+
+  <p class="lede">
+    It is <strong>not a firewall and not a sandbox</strong>. It intercepts what an agent
+    <em>declares</em> it is about to do, through each vendor's hook system. An agent that does not
+    fire hooks, or that misreports its own tool input, is not covered — and
+    <code>usewarden status</code> is built to tell you loudly when that is the case.
+  </p>
+
+  <p>
+    <span class="badge">0 runtime dependencies</span>
+    <span class="badge">no install scripts, ever</span>
+    <span class="badge">runs entirely on your machine</span>
+    <span class="badge">MIT</span>
+  </p>
+
+  <h2>Is this your week?</h2>
+  <ul>
+    <li><strong>"It deleted files I never asked it to touch."</strong> <code>rm -rf</code> taking
+      out the wrong directory is a recurring, publicly documented failure across agents. The common
+      thread is not a bug in any one of them: it is that agents run on your host with your
+      permissions.</li>
+    <li><strong>"It edited the wrong repo."</strong> The most common real drift in this project's
+      own live sessions was an agent writing into a <em>sibling</em> checkout beside the one it was
+      told to work in.</li>
+    <li><strong>"It ignored my rules file."</strong> Instructions in a file are advisory. A hook is
+      not.</li>
+    <li><strong>Context rot.</strong> Forty messages in, it contradicts a decision you made
+      together and edits a file it no longer remembers reading. usewarden warns at a context
+      threshold and can compare what the agent is <em>doing</em> against the goal you
+      <em>declared</em>.</li>
+  </ul>
+
+  <pre><code>npx usewarden init      # detects your agents, previews every config change, then registers
+npx usewarden demo      # see a real incident card in under a minute
+npx usewarden status    # is it actually protecting you right now?</code></pre>
+
+  <div class="note">
+    <strong>Not yet published.</strong> usewarden is built and verified but has not been released
+    to npm. The commands above are what the shipped tool does; they will not resolve today.
+  </div>
+
+  <h2>Two layers, in this order</h2>
+
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Layer</th><th>What it does</th><th>Cost</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="num">1</td>
+        <td>Deterministic. Scope globs, command patterns, protected branches, sibling-repo
+            detection, context-fill threshold. Runs on <em>every</em> event.</td>
+        <td class="num">zero tokens</td>
+      </tr>
+      <tr>
+        <td class="num">2</td>
+        <td>An LLM judge, sampled, for semantic drift from the goal you declared. Warns; never
+            blocks on its own, and can never overturn a layer-1 block.</td>
+        <td class="num">sampled, capped</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>
+    Layer 1 alone caught <strong>14 of 17</strong> scenarios in the sabotage suite — it misses
+    the two that are semantic by nature, which is what layer 2 is for, and one whose input no
+    agent actually sends. That third one used to be counted as a catch; it was scored against a
+    field the test supplied and the product never receives, so the number came down rather than
+    the scenario being quietly dropped. If the judge is unreachable, usewarden fails <em>open</em>
+    with a visible warning and layer 1 keeps running. It never silently switches itself off.
+  </p>
+
+  <h2>The failure mode this product takes seriously</h2>
+
+  <p>
+    A guardian that has quietly stopped running is worse than no guardian, because you have
+    stopped watching too. So the loudest thing usewarden does is tell you when it is <em>not</em>
+    protecting you:
+  </p>
+
+  <ul>
+    <li><strong>UNPROTECTED</strong> — hook entries missing, or hooks globally disabled</li>
+    <li><strong>TAMPERED</strong> — an entry tagged as usewarden's does not invoke usewarden's own binary</li>
+    <li><strong>POLICY_INVALID</strong> — your policy file does not parse, so nothing is being enforced</li>
+  </ul>
+
+  <p>
+    All three exit non-zero and print in red. This was proved by removing the hook registrations
+    from a live agent session and running the same attack again: with hooks present the read was
+    blocked, with them removed the read <em>succeeded</em> and status said UNPROTECTED, and with
+    them restored it was blocked again.
+  </p>
+
+  <h2>Numbers you can check</h2>
+
+  <p>
+    "Actions blocked" is a marketing number, and a marketing number that cannot be audited is a
+    claim. So usewarden derives every figure by query at the moment you ask, groups it by where
+    it came from, and re-checks the arithmetic on every read.
+  </p>
+
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Rule</th><th>What it means in practice</th></tr></thead>
+    <tbody>
+      <tr><td>Real sessions only</td>
+          <td>A <code>usewarden demo</code> run cannot move a headline figure. Demo catches are
+              recorded, labelled, and reported separately.</td></tr>
+      <tr><td>Retries do not multiply</td>
+          <td>Attempts and <em>distinct</em> actions are reported side by side. An agent retrying
+              the same blocked read five times is five attempts against one action.</td></tr>
+      <tr><td>Estimates say so</td>
+          <td>Token and dollar savings are shown as a <em>range</em>, never a point, with every
+              constant printed by <code>usewarden metrics</code>.</td></tr>
+      <tr><td>Some things are never priced</td>
+          <td>"We stopped your API key reaching a model context" is counted and named. Converting
+              it to a dollar figure would be inventing precision.</td></tr>
+      <tr><td>Overhead sits beside savings</td>
+          <td>What usewarden's own judge cost you is shown next to what it saved, not netted off
+              behind your back.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>
+    The full method — every constant, its reasoning, and what would make it a measurement rather
+    than an estimate — is in <code>docs/METRICS.md</code>.
+  </p>
+
+  <h2>Its own install path is an attack surface</h2>
+
+  <p>
+    A tool that writes to your agent's config files is a tool that a supply-chain attacker would
+    like to own. usewarden is built on that assumption:
+  </p>
+
+  <ul>
+    <li><strong>No install scripts.</strong> No <code>preinstall</code>, <code>install</code>,
+        <code>postinstall</code>, or <code>prepare</code> — the exact mechanism the August 2026
+        npm worm used across 444 packages. A test fails the build if one ever appears, in
+        usewarden's manifest or anywhere in its lockfile.</li>
+    <li><strong>Zero runtime dependencies.</strong> Nothing to compromise upstream.</li>
+    <li><strong>Every config change is previewed as a diff</strong> before it is applied, and
+        backed up first. <code>usewarden uninstall</code> restores byte-identically — verified by
+        sha256, on a simulated clean machine.</li>
+    <li><strong>Hook commands are fixed argv</strong> — an absolute path to node, an absolute path
+        to usewarden's own script, no shell, no interpolation of anything an agent said.</li>
+    <li><strong>A repo's <code>usewarden.yaml</code> is untrusted input.</strong> It can narrow
+        your scope. It cannot widen it without an explicit <code>usewarden trust</code>.</li>
+  </ul>
+
+  <h2>Telemetry</h2>
+
+  <p>
+    Off by default, and this version ships <em>no endpoint at all</em> — there is nowhere for a
+    payload to go even if it were built. Opting in shows you the exact payload first, then records
+    a consent receipt naming the schema version and every field it covers. If the payload ever
+    gains a field, that receipt lapses and telemetry switches itself off until you read the new
+    one and agree again.
+  </p>
+
+  <p>
+    <code>DO_NOT_TRACK=1</code> and <code>USEWARDEN_TELEMETRY=0</code> are both honoured and both
+    override an explicit opt-in.
+  </p>
+
+  <h2>What it cannot do</h2>
+
+  <ul>
+    <li>It hooks the agents that <em>have</em> hooks. An agent with no hook API, or a desktop
+        wrapper that ignores project config, is not covered — and <code>usewarden status</code>
+        says so rather than implying otherwise.</li>
+    <li>Layer 2 is sampled and fallible. It warns; it never blocks alone.</li>
+    <li>It is not a sandbox. A determined agent with shell access has other routes; usewarden
+        raises the cost and creates the record, it does not make the machine safe.</li>
+    <li>The savings figures are estimates, and say so on every surface.</li>
+  </ul>
+
+  <h2>Write-ups</h2>
+  <p>
+    Defects found while building this, written up in full — including the ones that were our own
+    fault. <a href="https://djayamah.github.io/usewarden/writeups/">Read the series</a>.
+  </p>
+
+  <footer>
+    <p>
+      usewarden · MIT · <a href="https://github.com/djayamah/usewarden">source on GitHub</a>.
+      The package is <strong>not published to npm yet</strong>; this page is served from the
+      repository itself.
+    </p>
+  </footer>
+
+</main>
+</body>
+</html>

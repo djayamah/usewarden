@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="content-security-policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'none'; base-uri 'none'; frame-ancestors 'none'">
+<meta name="referrer" content="no-referrer">
+<link rel="canonical" href="https://djayamah.github.io/usewarden/writeups/01-hook-not-running.html">
+<meta name="description" content="you added a hook to ~/.claude/settings.json. The JSON is valid. The agent">
+<title>Your agent hook says it is registered. It has never run. — usewarden</title>
+<style>:root{--bg:#fff;--fg:#14171a;--dim:#5b6672;--line:#e2e6ea;--card:#f7f9fa;--mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;--sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}@media(prefers-color-scheme:dark){:root{--bg:#0d1117;--fg:#e6edf3;--dim:#8b949e;--line:#21262d;--card:#161b22}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:1.65;font-size:17px}main{max-width:44rem;margin:0 auto;padding:3rem 1.25rem 6rem}h1{font-size:1.95rem;line-height:1.25;margin:0 0 .5rem;letter-spacing:-.01em}h2{font-size:1.25rem;margin:2.6rem 0 .75rem}h3{font-size:1.05rem;margin:2rem 0 .5rem}.meta{color:var(--dim);font-size:.9rem;margin:0 0 2.5rem}pre{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:.85rem 1rem;overflow-x:auto;font-family:var(--mono);font-size:.85rem;line-height:1.5}code{font-family:var(--mono);font-size:.9em}p code,li code{background:var(--card);padding:.1em .35em;border-radius:3px}blockquote{margin:1.5rem 0;padding:.25rem 0 .25rem 1rem;border-left:3px solid var(--line);color:var(--dim)}hr{border:0;border-top:1px solid var(--line);margin:2.5rem 0}ul,ol{padding-left:1.3rem}li{margin:.35rem 0}a{color:inherit}footer{margin-top:4rem;padding-top:1.5rem;border-top:1px solid var(--line);color:var(--dim);font-size:.9rem}nav{font-size:.9rem;color:var(--dim);margin-bottom:2rem}</style>
+</head>
+<body>
+<main>
+<nav><a href="https://djayamah.github.io/usewarden/writeups/">← usewarden write-ups</a></nav>
+<h1>Your agent hook says it is registered. It has never run.</h1>
+<p class="meta">usewarden write-ups · piece 1</p>
+<p><strong>The symptom:</strong> you added a hook to <code>~/.claude/settings.json</code>. The JSON is valid. The agent starts fine. Nothing in the output mentions hooks at all. You assume it is working, because there is nothing to suggest otherwise.</p>
+<p>It has never executed once.</p>
+<hr>
+<h2>What was actually happening</h2>
+<p>The hook was registered like this:</p>
+<pre data-lang="json"><code>{ "type": "command", "command": "/abs/path/to/dist/src/cli.js", "args": ["hook", "claude", "pre_tool"] }</code></pre>
+<p>That is a real, existing, readable file. It has a shebang. The path is correct. And every single invocation failed with:</p>
+<pre><code>EACCES: permission denied, posix_spawn '/abs/path/to/dist/src/cli.js'</code></pre>
+<p>The build compiled TypeScript to <code>dist/</code>, and <strong><code>tsc</code> does not preserve or set an execute bit</strong>. The file was <code>rw-r--r--</code>. To run it as a command you need <code>rwxr-xr-x</code>. The agent tried to spawn it as a process, the OS refused, and the hook failed.</p>
+<p>What made it invisible was what the agent did with that failure. A hook that cannot be spawned is not a <em>deny</em> — it is an error. The agent's own behaviour on a hook error is to carry on. So the tool ran, the file got written, the command got executed, and the only trace was a line in a log nobody was reading.</p>
+<p>Meanwhile the tool's own <code>status</code> command said <strong>PROTECTED</strong>, in green, correctly, by its own logic: it checked that the hook entries were present in the config file, that they were tagged as its own, and that the config parsed. All three were true. None of them is the same question as <em>did this ever run</em>.</p>
+<hr>
+<h2>How it was found</h2>
+<p>Not by a test. By running a real agent session and reading the transcript.</p>
+<p>The test suite at the time was green, and it was green for a good reason: every test called the hook handler as a <strong>function</strong>. Functions do not need an execute bit. The suite proved the logic was right and could not have proved the file was reachable, because it never went through the path — spawn a process from a config file — where the failure lives.</p>
+<p>The first real session against a real agent failed on every event. It took about ninety seconds to find once anyone looked, and it had been sitting there through a fully green suite.</p>
+<hr>
+<h2>What changed</h2>
+<p><strong>Three things, and only one of them is the obvious one.</strong></p>
+<p><strong>1. Name the interpreter explicitly.</strong> The registration is now:</p>
+<pre data-lang="json"><code>{ "command": "/abs/path/to/node", "args": ["/abs/path/to/cli.js", "hook", "claude", "pre_tool"] }</code></pre>
+<p>Node is the executable; the script is an argument. That removes three separate failure modes at once — the execute bit, a wrong or missing shebang, and Windows, which has no shebang mechanism at all. Both components stay absolute paths, which matters for a different reason: a hook command that resolves through <code>PATH</code> can be hijacked by anything that puts itself earlier on <code>PATH</code>.</p>
+<p><strong>2. A check that the interpreter itself is real.</strong> Naming the interpreter introduces a new way to break: the recorded node path goes stale if you replace your node install. So there is now a diagnostic that asserts the node binary exists and is executable, separately from asserting that the script exists — two checks, because they fail for different reasons and have different fixes.</p>
+<p><strong>3. The status command stopped being allowed to infer.</strong> "The config contains my entries" is not evidence that anything ran. It is now one of several separately-reported facts, and the state that matters — has this fired — is answered by whether events were actually recorded, not by reading the config back.</p>
+<hr>
+<h2>The general shape</h2>
+<p>This is worth naming, because it is not really about execute bits.</p>
+<p><strong>A guardrail that fails open and reports on itself will report success.</strong> Every component here was behaving correctly and locally: <code>tsc</code> does not set execute bits, the agent continues past a hook error rather than hard-failing your session, and a status check that reads a config file correctly reports what is in the config file. The failure is in the gap between them, and no component can see the gap.</p>
+<p>The test suite could not catch it because the suite tested the <em>unit</em> and the failure was in the <em>integration with the operating system</em>. Green tests were not wrong; they were answering a different question than the one anyone was actually asking.</p>
+<p>If you have a hook, a git hook, a pre-commit, a CI guard, or any other thing whose job is to intervene: the check you want is not "is it configured". It is <strong>"how many times has it run, and when was the last one."</strong> If the answer is zero and you expected thousands, you have this bug. If your tool cannot tell you that number, that is the first thing to build.</p>
+<hr>
+<p><em>From the build log of <a href="https://github.com/djayamah/usewarden">usewarden</a>, an open-source guardrail for AI coding agents. This was the first of several defects where the tool reported that it was working while it was not — which is why the project now treats "has this fired against a live session?" as a required column in every verification table.</em></p>
+<footer>
+<p>This is the canonical copy. A shorter version is posted as a <a href="https://github.com/djayamah/usewarden/discussions/17">GitHub Discussion</a>.</p>
+<p>usewarden is a local guardrail for AI coding agents. <a href="https://github.com/djayamah/usewarden">Source on GitHub</a>.</p>
+</footer>
+</main>
+</body>
+</html>

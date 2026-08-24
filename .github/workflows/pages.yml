@@ -1,0 +1,91 @@
+# Publish `site/` to GitHub Pages — the canonical home for the write-up series.
+#
+# WHY THIS EXISTS RATHER THAN A HOSTING ACCOUNT (D-222, D-227)
+#   D-222 decided the canonical home must be a surface we control, because a page we own can carry
+#   `rel=canonical` and a GitHub Discussion cannot. `ops/MANUAL-STEPS.md` then listed "a hosting
+#   login" as a founder step, on the assumption that owning a site means renting a server.
+#   It does not: GitHub Pages on this repository is free for public repositories, needs no
+#   purchase, and is enabled and deployed entirely through the REST API and this workflow.
+#
+# WHY `build_type: workflow` AND NOT THE LEGACY BRANCH SOURCE
+#   The legacy source only accepts `/` or `/docs` as a publishing directory
+#   (docs.github.com/en/rest/pages/pages, read 2026-08-24). Our site lives in `site/`, and `docs/`
+#   is already the product documentation. A workflow build takes any path, so nothing had to be
+#   rearranged to fit the deployment mechanism.
+#
+# WHAT IT DOES NOT DO
+#   It does not build, test, or publish the package. It copies a directory of static files that
+#   contain no script, no external asset and no analytics — `tests/site.test.ts` asserts that.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+# Least privilege. `pages: write` and `id-token: write` are the two the deploy step documents as
+# required; `contents: read` is for the checkout and nothing else.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and a queued run supersedes an older one rather than racing it.
+# `cancel-in-progress: false` because cancelling a half-finished deploy can leave the site on a
+# partial upload, which is a worse failure than waiting.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # THE SITE MUST STAY SELF-CONTAINED, AND THIS IS THE GATE THAT KEEPS IT SO.
+      #
+      # `site/index.html` ships with a CSP of `default-src 'none'` and the whole point of the page
+      # is that it never wants an external asset. A script tag or a CDN link arriving later would
+      # not break the build, it would just quietly stop the CSP from being true. So it fails here,
+      # before anything is published, rather than being noticed by a reader.
+      - name: The published site must contain no script and no external asset
+        run: |
+          set -euo pipefail
+          bad=0
+          while IFS= read -r f; do
+            if grep -qiE '<script' "$f"; then echo "FAIL $f contains a <script> tag"; bad=1; fi
+            # Every absolute origin appearing in a src= or href=, minus the ones we allow.
+            # grep -E has no lookahead, so the exclusion is a second pass rather than a clever
+            # regex - the first version used (?!github\.com) and would have silently matched
+            # nothing on GNU grep, which is a gate that passes because it is broken.
+            offending="$(grep -oiE '(src|href)="https?://[^"/]+' "$f" \
+              | sed -E 's/.*"https?:\/\///' \
+              | grep -vxE 'github\.com|djayamah\.github\.io' || true)"
+            if [ -n "$offending" ]; then
+              echo "FAIL $f references external origin(s): $(echo "$offending" | tr '\n' ' ')"; bad=1
+            fi
+            if grep -qiE 'fonts\.googleapis|cdn\.|unpkg|jsdelivr|google-analytics|googletagmanager' "$f"; then
+              echo "FAIL $f references a CDN or an analytics host"; bad=1
+            fi
+          done < <(find site -name '*.html' -type f)
+          if [ "$bad" -ne 0 ]; then
+            echo "=== REFUSING TO PUBLISH: the site is no longer self-contained ==="
+            exit 1
+          fi
+          echo "site is self-contained: no script, no CDN, no analytics"
+
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
