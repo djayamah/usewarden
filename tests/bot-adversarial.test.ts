@@ -166,8 +166,25 @@ describe('bot: retrieval vocabulary', () => {
     }, corpus);
     assert.equal(r.answer?.answered, true,
       'the known defect appears to be fixed - delete this test and the DECISIONS entry with it');
-    assert.ok(r.answer!.citations.includes('docs/TELEMETRY.md'),
-      'the known defect has changed shape; re-measure before assuming it is gone');
+
+    // WHICH DOCUMENT IT ANSWERS FROM IS NOT THE DEFECT, AND PINNING IT WAS A MISTAKE.
+    //
+    // This asserted `citations.includes('docs/TELEMETRY.md')` until 2026-08-24, when adding
+    // docs/GIT-AWARENESS.md and two paragraphs to the README moved the winning passage to the
+    // README's Policy section. The defect was unchanged - an off-topic issue still gets answered -
+    // but the test failed with "the known defect has changed shape", which reads like a
+    // regression in the bot and was in fact a regression in nothing.
+    //
+    // The citation is a function of corpus statistics across every document in the repository, so
+    // pinning it makes this test fail whenever ANYONE edits ANY document. That is the neighbouring
+    // suite's own point - "writing about the bot changes the bot" - turned into a tripwire. What
+    // is actually being pinned is that an off-topic question is answered at all, and that the
+    // answer comes from a user-facing document rather than from the maintainer log.
+    const cites = r.answer!.citations;
+    console.log(`    known defect still present; currently answered from ${[...new Set(cites)].join(', ')}`);
+    assert.ok(cites.every((c) => !/^(DECISIONS|PROGRESS|CLAUDE|SPEC-BUILD)\.md$/.test(c)),
+      `the defect has changed shape: it now answers from a maintainer log (${cites.join(', ')}), `
+      + 'which the rule in the next suite forbids outright');
   });
 });
 
