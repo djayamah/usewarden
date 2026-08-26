@@ -35,30 +35,36 @@ It raises the cost of the bad action and leaves a record you can look at.
 ## Quickstart
 
 ```bash
+npm install -g usewarden
+usewarden init      # detects your agents, shows you a diff, registers hooks
+usewarden demo      # see a real incident card in 5 seconds
+usewarden status    # is it actually protecting you right now?
+```
+
+Or without installing: `npx usewarden init`. Prefer to build it yourself?
+
+```bash
 git clone https://github.com/djayamah/usewarden && cd usewarden
-npm install && npm run build
-node dist/src/cli.js init      # detects your agents, shows you a diff, registers hooks
-node dist/src/cli.js demo      # see a real incident card in 5 seconds
-node dist/src/cli.js status    # is it actually protecting you right now?
+npm install && npm run build && node dist/src/cli.js init
 ```
 
 Node ≥ 22.13. Zero runtime dependencies. No install scripts. MIT.
 
-> **Not on npm yet.** `usewarden` is unclaimed on the registry and this repository has never
-> published to it. When it does, the line above becomes `npx usewarden init` — published through
-> OIDC trusted publishing with no npm token in existence, which is the whole point of
-> [the release hardening](#security-posture). Until then, from source is the only way, and saying
-> otherwise would be the first thing this tool tells you not to trust.
+> **Published through OIDC trusted publishing, with no npm token in existence** — which is the
+> whole point of [the release hardening](#security-posture). CI can only ever *stage* the
+> package; a human approves it on npmjs.com with a hardware security key. Don't take that on
+> trust: `npm audit signatures` reports a verified registry signature and a verified attestation,
+> and the provenance names the exact commit it was built from.
 
 ## FAQ
 
 **How do I install it?**
-Clone it and build it — see [Quickstart](#quickstart) just above for the four commands. There is
-nothing to sign up for and no install script: `usewarden init` detects which agents you have,
-shows you a diff of what it is about to change, and registers the hooks only when you agree.
-`usewarden status` then tells you whether it is actually running, which is the question that
-matters most. It is **not installable from npm yet** — the registry entry is a placeholder — so
-installing from source is currently the only way.
+`npm install -g usewarden`, or `npx usewarden init` without installing — see
+[Quickstart](#quickstart) just above. There is nothing to sign up for and no install script:
+`usewarden init` detects which agents you have, shows you a diff of what it is about to change,
+and registers the hooks only when you agree. `usewarden status` then tells you whether it is
+actually running, which is the question that matters most. Building from source works too, and
+the Quickstart carries those commands as well.
 
 **Is it free?**
 Yes. usewarden is free and open source under the MIT licence, and there is no paid tier, no
