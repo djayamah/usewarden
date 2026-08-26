@@ -352,13 +352,28 @@ export class Store {
   recentIncidents(limit = 50): (Incident & { live: number; origin: IncidentOrigin })[] {
     return this.q(`SELECT id,session_id AS sessionId,agent,ts,layer,severity,action,rule,title,
                           attempted,reason,tool,target,cwd,live,origin
-                   FROM incidents ORDER BY ts DESC LIMIT ?`).all(limit) as never;
+                   FROM incidents ORDER BY ts DESC, id DESC LIMIT ?`).all(limit) as never;
   }
   /** Incidents from ONE origin, newest first. The incident wall uses this to label demo cards. */
   incidentsByOrigin(origin: IncidentOrigin, limit = 50): (Incident & { live: number; origin: IncidentOrigin })[] {
     return this.q(`SELECT id,session_id AS sessionId,agent,ts,layer,severity,action,rule,title,
                           attempted,reason,tool,target,cwd,live,origin
-                   FROM incidents WHERE origin=? ORDER BY ts DESC LIMIT ?`).all(origin, limit) as never;
+                   FROM incidents WHERE origin=? ORDER BY ts DESC, id DESC LIMIT ?`).all(origin, limit) as never;
+  }
+  /**
+   * ONE incident, by the id `addIncident` returned.
+   *
+   * `demo` used to render its card by asking for the newest row of its origin, which is a guess:
+   * `ts` is millisecond-granular, the four demo scenarios are evaluated inside the same
+   * millisecond, and `ORDER BY ts DESC` alone leaves tied rows in an order SQLite does not
+   * define. The demo therefore printed an arbitrary one of the tied incidents - in practice the
+   * curl-pipe-shell card twice - while correctly reporting four distinct blocks. Looking a row up
+   * by the id the write returned removes the guess rather than making it more likely to be right.
+   */
+  incidentById(id: number): (Incident & { live: number; origin: IncidentOrigin }) | undefined {
+    return this.q(`SELECT id,session_id AS sessionId,agent,ts,layer,severity,action,rule,title,
+                          attempted,reason,tool,target,cwd,live,origin
+                   FROM incidents WHERE id=?`).get(id) as never;
   }
   countIncidents(): number {
     const r = this.q('SELECT COUNT(*) AS c FROM incidents').get() as { c: number };

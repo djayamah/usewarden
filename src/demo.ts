@@ -93,9 +93,13 @@ export async function runDemo(json: boolean): Promise<number> {
         reason: r.verdict.reason,
       });
       if (!json) {
-        const rows = store.incidentsByOrigin('demo', 1);
-        if (r.verdict.decision === 'deny' && rows[0]) {
-          process.stdout.write(indent(incidentCard(rows[0])) + '\n\n');
+        // The row this scenario just wrote, by id - NOT "the newest demo incident". All four
+        // scenarios land in the same millisecond, so ordering by `ts` alone left ties unresolved
+        // and printed one scenario's card twice while the summary correctly said four were
+        // blocked. The id comes back from the write, so there is nothing to tie-break.
+        const row = r.incidentId !== undefined ? store.incidentById(r.incidentId) : undefined;
+        if (r.verdict.decision === 'deny' && row) {
+          process.stdout.write(indent(incidentCard(row)) + '\n\n');
         } else {
           process.stdout.write('  ' + bad(`scenario NOT caught: ${s.name}`) + '\n\n');
         }
