@@ -22,7 +22,7 @@ import { findRepoRoot, loadPolicy, PolicyLoadError, starterPolicyYaml, trust, un
 import { bad, box, checkbox, dim, head, ok, paint, stateBadge, table, warn, wrapLine } from './term.js';
 import { buildMetrics, fmtInt, fmtTokenBand, fmtUsdBand, TURN_TOKENS, TURNS_WASTED } from './metrics.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 
 const USAGE = `usewarden ${VERSION} - a guardrail for your AI coding agents
 
