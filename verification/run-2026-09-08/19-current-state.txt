@@ -1,0 +1,9 @@
+=== CURRENT STATE (usewarden is uninstalled on this machine; not reinstalling) ===
+--- status --json (trimmed) ---
+ overall: PROTECTED
+ liveCatches: 39  totalCatches: 495
+ agents: [('Claude Code', 'PROTECTED', True), ('Gemini CLI', 'PROTECTED', True), ('Codex CLI', 'PROTECTED', True)]
+ counters: {'events_seen': 691, 'actions_blocked': 470, 'catches': 495, 'judge_calls:6207e690-30bb-4ae5-b90a-5b5f50d2a135': 3, 'drift_caught': 24, 'judge_calls:ee17edd6-5927-4aca-ac86-31b91a9b268f': 6, 'judge_calls:cc4c5f3a-7631-4abb-be56-5495f9cd985e': 2, 'judge_calls:vfy': 1, 'judge_calls:vfy2': 1, 'judge_calls:7366d47d-3ae6-4abb-8e7f-7ae74075335a': 2, 'judge_calls:5b6eb110-c828-4121-b896-8654e12f32bf': 5, 'judge_calls:461778c9-12ec-4b6b-bc07-ad6684d74f4b': 3, 'judge_calls:8bd9deb4-ac84-4d33-b3d2-9477336f96fa': 2, 'judge_calls:2dd9f81d-2f76-4b9d-9a2c-1bd5861ab895': 4, 'judge_calls:da68a176-f3fa-4a3c-bc83-22775ece79b3': 7, 'judge_calls:6e86c5fe-2c03-4706-bbe7-ea02cbe89cb9': 8, 'judge_calls:8ac34e0c-c9cf-4341-9133-9e68dee1cfa1': 9, 'judge_calls:1633b606-c1bd-400f-bb67-7fd7308b6dd0': 9, 'judge_calls:81ab72cc-64dd-4165-a70b-e28717d7ac5d': 3, 'judge_calls:28fb85e0-7591-47c1-9e3d-a0fd4ad2121b': 4, 'judge_calls:78e2ae2c-7263-43a5-85e5-be12418ab5a4': 3, 'judge_calls:505d7813-bb69-4178-b729-5215bbb29751': 1, 'judge_calls:0ee0c429-481b-4bc3-be78-69b6df398f4d': 6, 'judge_calls:67f7640e-862a-44f3-8b4c-a2871d394b09': 8}
+
+--- doctor exit code ---
+doctor exit: 0

@@ -1,0 +1,52 @@
+=== 3. scan the publication ref at FULL strictness ===
+scope:     history (publish)
+classes:   all
+head:      37a50416081f17a384f2b456af71e4458ff8f40e
+gitleaks:  8.30.1
+
+--- PASS 1: gitleaks, full history ---
+CLEAN    gitleaks: 0 findings across 23 commit(s)
+
+--- PASS 2: pattern scan, every blob in history ---
+         identity strings derived for this machine: 12 (not printed)
+         blobs scanned: 476 (of 659 candidates)
+BLOCKER  pattern scan: 1 finding(s) in 1 categor(y/ies)
+           [operator-identity] 1 hit(s) in 1 file(s):
+             ops/BOT-SCOPE.md  x1  (blob 92b9d69ead line 7): <redacted: line matched a machine-identity string>
+
+--- PASS 3: commit metadata (author and committer identity) ---
+           01275ca59f  bonjour-hostname email in author/committer <redacted>
+BLOCKER  commit metadata: 1 of 23 commit(s) carry a machine identity
+           Not fixable by editing a file: it is in the commit headers. Either rewrite
+           those commits, or accept it. scripts/build-publish-tree.sh now refuses to
+           MINT a new one (D-145).
+
+objects considered: 685
+
+=== SCAN BLOCKED - 2 pass(es) found something. DO NOT change visibility. ===
+=== is the CURRENT publish TREE clean, as opposed to its (already-public) history? ===
+
+--- PASS 1: gitleaks, full history ---
+SKIPPED  gitleaks - this run asks what publish PUBLISHES, and gitleaks answers a
+         history question. A clean tree says nothing about the history behind it.
+
+--- PASS 2: pattern scan, every file in the tree of publish ---
+         identity strings derived for this machine: 12 (not printed)
+         files scanned: 329 (of 345 candidates)
+CLEAN    pattern scan: 0 findings
+
+--- PASS 3: commit metadata (author and committer identity) ---
+         scope: the tip commit only - ancestry is a history question, see --scope=history
+CLEAN    commit metadata: 0 of 1 commit(s) carry a machine identity
+
+objects considered: 346
+
+=== PATTERN PASS CLEAN - but gitleaks did NOT run. This is NOT the publication gate. ===
+    Run ./scripts/pre-public-scan.sh with gitleaks installed before any visibility change.
+
+=== is blob 92b9d69ead in the publish tree, or only in old history? ===
+publish:ops/BOT-SCOPE.md blob = a9b13adb0faed8de3a93a9a82f52455b8cab3c1b
+public/main:ops/BOT-SCOPE.md blob = a9b13adb0faed8de3a93a9a82f52455b8cab3c1b
+
+=== is the flagged commit 01275ca59f already on public main? ===
+  YES - 01275ca59f is already published; this push adds nothing new

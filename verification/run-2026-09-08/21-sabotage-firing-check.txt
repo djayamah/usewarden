@@ -1,0 +1,16 @@
+=== SABOTAGE: make a FIRING agent look silent, and confirm the new check flips ===
+State directory is a COPY at /tmp/usewarden-clean-machine/firing. The real .usewarden-live is untouched.
+
+--- step 1: assert the sabotage will land (Claude Code really has events now) ---
+  claude events before: 685
+
+--- step 2: delete every claude event ---
+  claude events after : 0
+
+--- step 3: doctor must now report Claude Code UNVERIFIED ---
+UNVERIFIED  Claude Code: hooks have actually fired         NO EVENTS EVER, registered 10d ago. Either you have not used this agent since then, or its hooks are registered and not executing. Usewarden cannot tell those apart from here: run any command in that agent and re-run "usewarden doctor".
+  2 checks UNVERIFIED - not a pass.
+
+--- step 4: --strict must exit non-zero ---
+  doctor --strict exit: 1  (expected 1)
+  doctor          exit: 0  (expected 0 - UNVERIFIED is not a hard failure by default)

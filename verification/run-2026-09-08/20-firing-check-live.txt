@@ -1,0 +1,54 @@
+=== THE DEFECT, VISIBLE FOR THE FIRST TIME ===
+2026-09-07T23:51:32Z
+
+--- usewarden status ---
+
+  usewarden  PROTECTED
+
+  AGENT                  STATE      LAST FIRED  CONFIG
+  Claude Code (project)  PROTECTED  10d ago     ~/dev/warden/fixtures/sandbox-project/.claude/settings.json
+  Gemini CLI (project)   PROTECTED  19d ago     ~/dev/warden/fixtures/sandbox-project/.gemini/settings.json
+  Codex CLI (project)    PROTECTED  never       ~/dev/warden/fixtures/sandbox-project/.codex/hooks.json
+
+  note Gemini CLI: Gemini CLI defaults to ALLOW if a hook prints anything but JSON on stdout. Usewarden routes all diagnostics to stderr.
+  note Codex CLI: Codex IDE and desktop wrappers may ignore project config entirely; usewarden registers at the user layer. Desktop-wrapper sessions are NOT covered.
+  UNVERIFIED Codex CLI is registered but usewarden has never seen it fire.
+             Registration is not evidence of execution. Run any command in that
+             agent, then "usewarden doctor" - or the hooks are not running.
+
+┌───────────────────────────────────┐
+│ Getting started                   │
+├───────────────────────────────────┤
+│ [x] Agents detected               │
+│ [x] Policy created                │
+│ [x] Protection verified           │
+│ [x] First catch in a real session │
+└───────────────────────────────────┘
+
+--- usewarden doctor ---
+PASS        node binary exists and is executable           /opt/homebrew/Cellar/node/25.5.0/bin/node
+PASS        usewarden script resolves to an absolute path  /Users/you/dev/warden/dist/src/cli.js
+PASS        usewarden script exists on disk                /Users/you/dev/warden/dist/src/cli.js
+PASS        state directory writable                       /Users/you/dev/warden/.usewarden-live
+PASS        policy loads                                   <built-in defaults> -> /Users/you/dev/warden/.usewarden-live/usewarden.yaml
+PASS        Claude Code: hooks registered                  /Users/you/dev/warden/fixtures/sandbox-project/.claude/settings.json
+PASS        Claude Code: entries unmodified                match the recorded baseline
+PASS        Claude Code: hooks not globally disabled       ok
+PASS        Claude Code: command points at usewarden       /Users/you/dev/warden/dist/src/cli.js
+PASS        Claude Code: hooks have actually fired         685 events recorded, last 10d ago
+PASS        Gemini CLI: hooks registered                   /Users/you/dev/warden/fixtures/sandbox-project/.gemini/settings.json
+PASS        Gemini CLI: entries unmodified                 match the recorded baseline
+PASS        Gemini CLI: hooks not globally disabled        ok
+PASS        Gemini CLI: command points at usewarden        /Users/you/dev/warden/dist/src/cli.js
+PASS        Gemini CLI: hooks have actually fired          6 events recorded, last 19d ago
+PASS        Codex CLI: hooks registered                    /Users/you/dev/warden/fixtures/sandbox-project/.codex/hooks.json
+PASS        Codex CLI: entries unmodified                  match the recorded baseline
+PASS        Codex CLI: hooks not globally disabled         ok
+PASS        Codex CLI: command points at usewarden         /Users/you/dev/warden/dist/src/cli.js
+UNVERIFIED  Codex CLI: hooks have actually fired           NO EVENTS EVER, registered 10d ago. Either you have not used this agent since then, or its hooks are registered and not executing. Usewarden cannot tell those apart from here: run any command in that agent and re-run "usewarden doctor".
+
+  1 check UNVERIFIED - not a pass.
+  Usewarden could not observe these working. Registration is not evidence of execution.
+  "usewarden doctor --strict" exits non-zero on these, for scripts and CI.
+
+doctor exit: 0

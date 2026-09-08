@@ -1,0 +1,28 @@
+=== does TypeScript 7 emit the SAME JavaScript? (this is what would ship) ===
+  IDENTICAL emit across every file in dist/src
+
+  files compared: 39
+
+=== supply-chain surface delta ===
+  lockfile entries: 4 -> 24
+  added (20):
+    @typescript/typescript-aix-ppc64  7.0.2  [optional]
+    @typescript/typescript-darwin-arm64  7.0.2  [optional]
+    @typescript/typescript-darwin-x64  7.0.2  [optional]
+    @typescript/typescript-freebsd-arm64  7.0.2  [optional]
+    @typescript/typescript-freebsd-x64  7.0.2  [optional]
+    @typescript/typescript-linux-arm  7.0.2  [optional]
+    @typescript/typescript-linux-arm64  7.0.2  [optional]
+    @typescript/typescript-linux-loong64  7.0.2  [optional]
+    @typescript/typescript-linux-mips64el  7.0.2  [optional]
+    @typescript/typescript-linux-ppc64  7.0.2  [optional]
+    @typescript/typescript-linux-riscv64  7.0.2  [optional]
+    @typescript/typescript-linux-s390x  7.0.2  [optional]
+    @typescript/typescript-linux-x64  7.0.2  [optional]
+    @typescript/typescript-netbsd-arm64  7.0.2  [optional]
+    @typescript/typescript-netbsd-x64  7.0.2  [optional]
+    @typescript/typescript-openbsd-arm64  7.0.2  [optional]
+    @typescript/typescript-openbsd-x64  7.0.2  [optional]
+    @typescript/typescript-sunos-x64  7.0.2  [optional]
+    @typescript/typescript-win32-arm64  7.0.2  [optional]
+    @typescript/typescript-win32-x64  7.0.2  [optional]

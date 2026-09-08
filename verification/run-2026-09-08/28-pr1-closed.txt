@@ -1,0 +1,10 @@
+=== CLOSE PR #1 (reason in docs/DEPENDENCY-BUDGET.md and DECISIONS D-269; no comment posted) ===
+2026-09-08T00:08:24Z
+{"number":1,"state":"closed","title":"deps: bump typescript from 5.9.3 to 7.0.2"}
+--- read back separately ---
+{"closed_at":"2026-09-08T00:08:25Z","merged":false,"number":1,"state":"closed"}
+
+=== config reference check still green after dependabot.yml edits ===
+  checked against djayamah/usewarden: 15 labels, 2 environments
+
+PASS  every label, environment, actor and team named in .github/ exists in djayamah/usewarden

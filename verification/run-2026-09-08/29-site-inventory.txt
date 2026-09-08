@@ -1,0 +1,18 @@
+=== Pages deployment status ===
+{"build_type":"workflow","source":{"branch":"main","path":"/"},"status":null,"url":"https://djayamah.github.io/usewarden/"}
+
+=== site files in the repo ===
+site/README.md
+site/index.html
+site/writeups/01-hook-not-running.html
+site/writeups/README.md
+site/writeups/index.html
+
+=== all internal hrefs in the site ===
+https://code.claude.com/docs/en/permissions#redirections
+https://djayamah.github.io/usewarden/
+https://djayamah.github.io/usewarden/writeups/
+https://djayamah.github.io/usewarden/writeups/01-hook-not-running.html
+https://github.com/djayamah/usewarden
+https://github.com/djayamah/usewarden/discussions/17
+https://www.anthropic.com/engineering/claude-code-sandboxing

@@ -1,0 +1,25 @@
+=== PR #1 A/B, CLEAN TREE: typescript 5.9.3 vs 7.0.2 ===
+(the earlier run was contaminated by this run's own doc edits; those are fixed and the suite is 762/762)
+2026-09-08T00:05:45Z
+######## [base2] typescript 5.9.3 ########
+  typecheck exit: 0
+  build exit: 0
+  -- Node 25 --
+    ℹ tests 762
+    ℹ pass 760
+    ℹ fail 2
+  -- Node 22 --
+    # tests 762
+    # pass 760
+    # fail 2
+######## [ts7] typescript 7.0.2 ########
+  typecheck exit: 0
+  build exit: 0
+  -- Node 25 --
+    ℹ tests 762
+    ℹ pass 760
+    ℹ fail 2
+  -- Node 22 --
+    # tests 762
+    # pass 760
+    # fail 2

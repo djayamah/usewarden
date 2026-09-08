@@ -1,0 +1,36 @@
+=== SABOTAGE TEST: delete the 'dependencies' label and confirm the check FAILS ===
+2026-09-07T23:44:38Z
+
+--- step 1: assert the sabotage will land (the label is really there now) ---
+dependencies
+
+--- step 2: delete it ---
+deleted
+
+--- step 3: read back that it is REALLY gone (not trusting the delete) ---
+{"message":"Not Found","documentation_url":"https://docs.github.com/rest/issues/labels#get-a-label","status":"404"}gh: Not Found (HTTP 404)
+
+--- step 4: the check must now FAIL ---
+=== config reference check ===
+  scanner self-test (a scanner that extracts nothing would otherwise report clean):
+  ok    flow sequence
+  ok    block sequence
+  ok    inline scalar environment
+  ok    expanded environment
+  ok    block scalar bodies are ignored
+  ok    trailing comments are stripped
+  ok    CODEOWNERS actors and teams
+
+  scanned 6 file(s), found 15 reference(s)
+  checked against djayamah/usewarden: 14 labels, 2 environments
+
+2 problem(s):
+
+FAIL  .github/dependabot.yml:35  label `dependencies` does not exist in djayamah/usewarden — GitHub ignores it silently
+FAIL  .github/dependabot.yml:74  label `dependencies` does not exist in djayamah/usewarden — GitHub ignores it silently
+
+A configuration that names something absent is not a configuration that is off.
+It is one that reads as on and enforces nothing.
+EXIT: 1
+
+SABOTAGE CAUGHT: the check failed, as it must.

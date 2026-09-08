@@ -1,0 +1,10 @@
+=== EMPIRICAL: does POST /issues/{n}/labels auto-create a nonexistent label? ===
+Run on the PRIVATE mirror djayamah/warden, never the public repo.
+--- create throwaway issue ---
+issue #6
+--- attempt to add a label that does not exist: zzz-probe-nonexistent-label ---
+[{"id":12099651691,"node_id":"LA_kwDOT9j_CM8AAAAC0TIIaw","url":"https://api.github.com/repos/djayamah/warden/labels/zzz-probe-nonexistent-label","name":"zzz-probe-nonexistent-label","color":"ededed","default":false,"description":null}]
+--- read back the issue's labels ---
+["zzz-probe-nonexistent-label"]
+--- does the label now exist in the repo? ---
+zzz-probe-nonexistent-label

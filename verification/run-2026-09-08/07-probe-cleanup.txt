@@ -1,0 +1,8 @@
+=== PROBE CLEANUP ===
+--- delete the auto-created probe label ---
+deleted
+--- delete the throwaway issue (GraphQL deleteIssue) ---
+{"data":{"deleteIssue":{"repository":{"name":"warden"}}}}--- read back: label gone? ---
+{"message":"Not Found","documentation_url":"https://docs.github.com/rest/issues/labels#get-a-label","status":"404"}gh: Not Found (HTTP 404)
+--- read back: issue gone? ---
+{"message":"This issue was deleted","documentation_url":"https://docs.github.com/rest/issues/issues#get-an-issue","status":"410"}gh: This issue was deleted (HTTP 410)

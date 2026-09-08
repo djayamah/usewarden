@@ -1,0 +1,26 @@
+=== DID THE TRIAGE BOT STAY SILENT ON THE DISCUSSION #17 COMMENT? ===
+Run 'Issue triage' / discussion_comment / 2026-09-07T16:44:13Z reported SUCCESS.
+Success means the job RAN. The question is whether it POSTED.
+
+run id: 34144622442
+--- the Triage step's log ---
+triage	UNKNOWN STEP	2026-09-07T16:44:27.1132348Z   USEWARDEN_BOT_GEMINI_KEY: 
+triage	UNKNOWN STEP	2026-09-07T16:44:27.1132600Z   USEWARDEN_BOT_OPENAI_KEY: 
+triage	UNKNOWN STEP	2026-09-07T16:44:27.1132889Z   USEWARDEN_BOT_ANTHROPIC_KEY: 
+triage	UNKNOWN STEP	2026-09-07T16:44:27.1133137Z ##[endgroup]
+triage	UNKNOWN STEP	2026-09-07T16:44:27.1540937Z triage: halted: TRIAGE_BOT_ENABLED is "false", not "true"
+triage	UNKNOWN STEP	2026-09-07T16:44:27.1547426Z triage: {"acted":false,"reason":"kill_switch_variable"}
+triage	UNKNOWN STEP	2026-09-07T16:44:27.1675292Z Post job cleanup.
+triage	UNKNOWN STEP	2026-09-07T16:44:27.2984571Z (node:2358) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+triage	UNKNOWN STEP	2026-09-07T16:44:27.2986005Z (Use `node --trace-deprecation ...` to show where the warning was created)
+triage	UNKNOWN STEP	2026-09-07T16:44:27.3299918Z Post job cleanup.
+triage	UNKNOWN STEP	2026-09-07T16:44:27.4252607Z [command]/usr/bin/git version
+triage	UNKNOWN STEP	2026-09-07T16:44:27.4275594Z git version 2.55.0
+triage	UNKNOWN STEP	2026-09-07T16:44:27.4381846Z Temporarily overriding HOME='/home/runner/work/_temp/4bcc7df0-6d26-45b6-8541-3d03557de10d' before making global git config changes
+triage	UNKNOWN STEP	2026-09-07T16:44:27.4401433Z Adding repository directory to the temporary git global config as a safe directory
+triage	UNKNOWN STEP	2026-09-07T16:44:27.4411930Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/usewarden/usewarden
+triage	UNKNOWN STEP	2026-09-07T16:44:27.4414912Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+triage	UNKNOWN STEP	2026-09-07T16:44:27.4417062Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+triage	UNKNOWN STEP	2026-09-07T16:44:27.4659103Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+triage	UNKNOWN STEP	2026-09-07T16:44:27.4699906Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+triage	UNKNOWN STEP	2026-09-07T16:44:27.5157839Z Cleaning up orphan processes

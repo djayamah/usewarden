@@ -1,0 +1,25 @@
+=== OPEN PRs ===
+#26 ci: bump actions/setup-node from 5.0.0 to 7.0.0  [CLEAN] labels=dependencies
+#25 ci: bump actions/checkout from 5.0.0 to 7.0.1  [CLEAN] labels=dependencies
+#1 deps: bump typescript from 5.9.3 to 7.0.2  [CLEAN] labels=dependencies
+
+=== OPEN ISSUES ===
+#14 Is this free or paid?  labels=question,unmatched
+#9 confused - do i need to pay for something?  labels=agent:claude,unmatched
+
+=== RECENT WORKFLOW RUNS (last 15) ===
+skipped	Issue triage	issue_comment	main	2026-09-07T23:47:02Z
+success	Issue triage	discussion_comment	main	2026-09-07T16:44:13Z
+skipped	Issue triage	issue_comment	main	2026-09-02T02:34:18Z
+skipped	Issue triage	issue_comment	main	2026-09-02T02:34:16Z
+success	CI	pull_request	dependabot/npm_and_yarn/types/node-26.3.0	2026-09-02T02:34:16Z
+success	npm_and_yarn in /. - Update #1551104221	dynamic	main	2026-09-02T02:33:30Z
+success	github_actions in /. - Update #1551104243	dynamic	main	2026-09-02T02:33:30Z
+success	Issue triage	discussion	main	2026-08-26T06:36:47Z
+success	release	workflow_dispatch	main	2026-08-26T06:34:31Z
+success	CI	push	main	2026-08-26T06:34:13Z
+success	CI	pull_request	release-0-1-1	2026-08-26T06:33:18Z
+success	CI	push	main	2026-08-26T06:24:53Z
+success	CI	pull_request	readme-npm-live	2026-08-26T06:23:55Z
+success	release	workflow_dispatch	main	2026-08-26T04:47:32Z
+success	release	workflow_dispatch	main	2026-08-26T04:45:51Z

@@ -1,0 +1,7 @@
+--- pin exactly 26.3.0, as PR #31's lockfile does ---
+
+changed 1 package in 704ms
+    "version": "26.3.0",
+
+=== TYPECHECK (tsc --noEmit) with @types/node 26.3.0 ===
+typecheck exit: 

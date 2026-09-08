@@ -1,0 +1,21 @@
+=== TypeScript 7.0.2: does it build and pass? ===
+--- typecheck ---
+  typecheck exit: 0
+--- build ---
+  build exit: 0
+--- suite Node 25 ---
+  ℹ tests 762
+  ℹ pass 755
+  ℹ fail 7
+--- suite Node 22 ---
+  # tests 762
+  # pass 755
+  # fail 7
+
+=== the things this project actually cares about ===
+--- install scripts anywhere in the new tree? ---
+  install scripts: NONE
+  new platform packages: 20
+  runtime deps: 0
+--- what would ship ---
+  tarball files: 45

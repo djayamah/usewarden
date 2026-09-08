@@ -1,0 +1,25 @@
+=== LIVE LINK CHECK on the published Pages site ===
+2026-09-08T00:08:42Z
+  200 https://djayamah.github.io/usewarden/
+  200 https://djayamah.github.io/usewarden/writeups/
+  200 https://djayamah.github.io/usewarden/writeups/01-hook-not-running.html
+  200 https://github.com/djayamah/usewarden
+  200 https://github.com/djayamah/usewarden/discussions/17
+  200 https://code.claude.com/docs/en/permissions
+  200 https://www.anthropic.com/engineering/claude-code-sandboxing
+
+=== does the LIVE site match the repo's site/index.html? ===
+  live bytes:    15933  repo bytes:    19867
+  DIFFERS - the deployed site is not the tracked file
+=== compare LIVE Pages site against PUBLIC main's site/index.html ===
+  public main bytes:    15933
+  live site  bytes:    15933
+  IDENTICAL - Pages is serving exactly what is on public main
+
+=== last pages deployment ===
+success	2026-08-24T12:26:13Z	957dc662
+success	2026-08-24T12:22:20Z	0345d08f
+failure	2026-08-24T12:22:01Z	0345d08f
+
+=== public main HEAD ===
+d8d1ead7  2026-08-26T06:34:10Z  release: 0.1.1 — the npm page still says "Not on npm yet", and only a publish fixes it (#29)

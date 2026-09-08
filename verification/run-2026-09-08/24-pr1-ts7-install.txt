@@ -1,0 +1,11 @@
+=== PR #1 EVALUATION: typescript 5.9.3 -> 7.0.2 ===
+2026-09-07T23:58:39Z
+--- install ---
+
+added 4 packages in 3s
+--- versions ---
+typescript  7.0.2
+@types/node 22.20.1
+--- lockfile entry count: baseline vs now ---
+ts7 tree: 24 entries
+baseline: 4 entries

@@ -1,0 +1,5 @@
+=== agent config fingerprints BEFORE verify-all (hashes only, never contents) ===
+  .claude/settings.json    cebc3db83d12565f63599d0f41a3a800
+  .gemini/settings.json    ca3d163bab055381827226140568f3be
+  .codex/hooks.json        ca3d163bab055381827226140568f3be
+  usewarden entries present in any of them: 0 file(s)

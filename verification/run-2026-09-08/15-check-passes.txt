@@ -1,0 +1,16 @@
+=== config reference check, after the fixes ===
+=== config reference check ===
+  scanner self-test (a scanner that extracts nothing would otherwise report clean):
+  ok    flow sequence
+  ok    block sequence
+  ok    inline scalar environment
+  ok    expanded environment
+  ok    block scalar bodies are ignored
+  ok    trailing comments are stripped
+  ok    CODEOWNERS actors and teams
+
+  scanned 6 file(s), found 15 reference(s)
+  checked against djayamah/usewarden: 15 labels, 2 environments
+
+PASS  every label, environment, actor and team named in .github/ exists in djayamah/usewarden
+EXIT: 0
