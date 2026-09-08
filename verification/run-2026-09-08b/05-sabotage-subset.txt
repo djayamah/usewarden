@@ -1,0 +1,19 @@
+=== SABOTAGE 1: hide the red repo and check ONLY the healthy one ===
+This is the exact failure being guarded against: a sweep that looks at one surface,
+finds it green, and reports health about a project that has a red repo elsewhere.
+
+--- the healthy repo alone, with no count assertion: would report green ---
+  no failing runs, no stale pull requests
+
+=== ALL 1 REPOSITOR(Y/IES) HEALTHY ===
+    no failed runs, no workflow that has never succeeded, no stale pull request.
+  exit: 
+
+--- the SAME narrowed sweep, with the count asserted ---
+captured: 2026-09-08T03:28:44.577Z
+repositories derived from git remotes: 1
+  public	djayamah/usewarden
+
+FAIL  expected 2 repositor(y/ies), derived 1.
+      A health check that narrows silently reports green about somewhere the problem is not.
+  exit: 

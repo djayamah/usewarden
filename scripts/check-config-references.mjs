@@ -245,14 +245,28 @@ function gh(args) {
   return r;
 }
 
-/** The repository these configs will actually run in — derived, never typed in twice. */
-function targetRepo() {
+/**
+ * EVERY REPOSITORY THESE CONFIGS RUN IN, NOT JUST THE PUBLISHED ONE.
+ *
+ * This read `package.json`'s `repository.url` and checked that one repository — the public one.
+ * The same `.github/` tree is on the PRIVATE mirror, Dependabot runs there too, and on 2026-09-08
+ * it turned out Dependabot had been posting *"The following labels could not be found:
+ * `dependencies`"* on that repository since 2026-08-19 as well. The check had been aimed at one
+ * surface while the identical failure sat on the other — the same defect it exists to catch, in
+ * the checker itself (D-276).
+ *
+ * The set comes from `scripts/repos.txt`, the same list `scripts/repo-health.mjs` reads, so a
+ * repository is in scope for both or neither. `--repo=` narrows it, for the sabotage test only.
+ */
+function targetRepos() {
   const flag = process.argv.find((a) => a.startsWith('--repo='));
-  if (flag) return flag.slice('--repo='.length);
-  const url = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')).repository?.url ?? '';
-  const m = url.match(/github\.com[/:]([^/]+\/[^/.]+)/);
-  if (!m) throw new Unverified('package.json does not name a GitHub repository to check against');
-  return m[1];
+  if (flag) return [flag.slice('--repo='.length)];
+  const f = path.join(REPO, 'scripts', 'repos.txt');
+  if (!fs.existsSync(f)) throw new Unverified('scripts/repos.txt is missing - the set of repositories to check is unknown');
+  const list = fs.readFileSync(f, 'utf8').split('\n')
+    .map((l) => l.replace(/#.*/, '').trim()).filter((l) => l !== '');
+  if (list.length === 0) throw new Unverified('scripts/repos.txt is empty - refusing to check an unstated set');
+  return list;
 }
 
 function apiJson(repoSlug, endpoint) {
@@ -410,52 +424,66 @@ function main() {
       + `      source:  ${r.source}`);
   }
 
-  let repoSlug, inv;
+  let repoSlugs;
   try {
-    repoSlug = targetRepo();
-    inv = inventory(repoSlug);
+    repoSlugs = targetRepos();
   } catch (e) {
     if (e instanceof Unverified) {
       console.log(`\nUNVERIFIED  ${e.message}`);
-      console.log('            The static checks above ran; existence of labels, environments and');
-      console.log('            actors was NOT checked. This is not a pass (CLAUDE.md §4.4).');
       if (problems.length > 0) { console.error('\n' + problems.map((p) => `FAIL  ${p}`).join('\n')); return 1; }
       return 3;
     }
     throw e;
   }
+  console.log(`  repositories these configs run in: ${repoSlugs.join(', ')}`);
 
-  const checked = [];
-  if (inv.labels) checked.push(`${inv.labels.size} labels`);
-  if (inv.envs) checked.push(`${inv.envs.size} environments`);
-  console.log(`  checked against ${repoSlug}: ${checked.join(', ') || 'nothing readable by this token'}`);
-
-  // Every reference whose class this token could not read. Reported by name and counted, never
-  // folded into the pass and never reported as a missing object.
   const unverified = [];
-  const seenActors = new Map();
-  for (const r of refs) {
-    if (r.kind === 'label') {
-      if (!inv.labels) { unverified.push(`${r.file}:${r.line}  label \`${r.name}\`: ${inv.unverifiedKinds.get('label')}`); continue; }
-      if (!inv.labels.has(r.name)) problems.push(`${r.file}:${r.line}  label \`${r.name}\` does not exist in ${repoSlug} — GitHub ignores it silently`);
+  let checkedRepos = 0;
+
+  for (const repoSlug of repoSlugs) {
+    let inv;
+    try {
+      inv = inventory(repoSlug);
+    } catch (e) {
+      if (e instanceof Unverified) {
+        // ONE UNREADABLE REPOSITORY DOES NOT MAKE THE OTHERS A PASS. It is counted by name and the
+        // run cannot come back green — the same rule scripts/repo-health.mjs enforces, for the same
+        // reason: a check that quietly covers fewer surfaces than exist is the defect.
+        unverified.push(`${repoSlug}: ${e.message}`);
+        console.log(`  ${repoSlug}: UNVERIFIED — ${e.message}`);
+        continue;
+      }
+      throw e;
     }
-    if (r.kind === 'environment') {
-      if (!inv.envs) { unverified.push(`${r.file}:${r.line}  environment \`${r.name}\`: ${inv.unverifiedKinds.get('environment')}`); continue; }
-      if (!inv.envs.has(r.name)) problems.push(`${r.file}:${r.line}  environment \`${r.name}\` does not exist in ${repoSlug} — the job's protection rules are not what this file says`);
-    }
-    if (r.kind === 'team') {
-      const teams = inv.teams();
-      if (!teams) { unverified.push(`${r.file}:${r.line}  team \`@${r.name}\`: ${inv.unverifiedKinds.get('team')}`); continue; }
-      problems.push(teams.size === 0
-        ? `${r.file}:${r.line}  team \`@${r.name}\` is named, but ${repoSlug} has no teams at all — it will be assigned nothing`
-        : teams.has(r.name) ? null : `${r.file}:${r.line}  team \`@${r.name}\` has no access to ${repoSlug} — it will be assigned nothing`);
-      if (problems[problems.length - 1] === null) problems.pop();
-    }
-    if (r.kind === 'actor') {
-      if (!seenActors.has(r.name)) seenActors.set(r.name, actorHasAccess(repoSlug, r.name));
-      const got = seenActors.get(r.name);
-      if (got === null) { unverified.push(`${r.file}:${r.line}  @${r.name}: this token cannot read the collaborator list of ${repoSlug}`); continue; }
-      if (!got) problems.push(`${r.file}:${r.line}  @${r.name} is not a collaborator on ${repoSlug} — naming them assigns nobody`);
+    checkedRepos++;
+
+    const checked = [];
+    if (inv.labels) checked.push(`${inv.labels.size} labels`);
+    if (inv.envs) checked.push(`${inv.envs.size} environments`);
+    console.log(`  checked against ${repoSlug}: ${checked.join(', ') || 'nothing readable by this token'}`);
+
+    const seenActors = new Map();
+    for (const r of refs) {
+      if (r.kind === 'label') {
+        if (!inv.labels) { unverified.push(`${repoSlug} ${r.file}:${r.line} label \`${r.name}\`: ${inv.unverifiedKinds.get('label')}`); continue; }
+        if (!inv.labels.has(r.name)) problems.push(`${repoSlug}  ${r.file}:${r.line}  label \`${r.name}\` does not exist — GitHub ignores it silently`);
+      }
+      if (r.kind === 'environment') {
+        if (!inv.envs) { unverified.push(`${repoSlug} ${r.file}:${r.line} environment \`${r.name}\`: ${inv.unverifiedKinds.get('environment')}`); continue; }
+        if (!inv.envs.has(r.name)) problems.push(`${repoSlug}  ${r.file}:${r.line}  environment \`${r.name}\` does not exist — the job's protection rules are not what this file says`);
+      }
+      if (r.kind === 'team') {
+        const teams = inv.teams();
+        if (!teams) { unverified.push(`${repoSlug} ${r.file}:${r.line} team \`@${r.name}\`: ${inv.unverifiedKinds.get('team')}`); continue; }
+        if (teams.size === 0) problems.push(`${repoSlug}  ${r.file}:${r.line}  team \`@${r.name}\` is named, but the repository has no teams at all`);
+        else if (!teams.has(r.name)) problems.push(`${repoSlug}  ${r.file}:${r.line}  team \`@${r.name}\` has no access — it will be assigned nothing`);
+      }
+      if (r.kind === 'actor') {
+        if (!seenActors.has(r.name)) seenActors.set(r.name, actorHasAccess(repoSlug, r.name));
+        const got = seenActors.get(r.name);
+        if (got === null) { unverified.push(`${repoSlug} ${r.file}:${r.line} @${r.name}: this token cannot read the collaborator list`); continue; }
+        if (!got) problems.push(`${repoSlug}  ${r.file}:${r.line}  @${r.name} is not a collaborator — naming them assigns nobody`);
+      }
     }
   }
 
@@ -471,14 +499,14 @@ function main() {
     return 1;
   }
 
-  if (unverified.length > 0) {
-    console.log(`\n${unverified.length} reference(s) UNVERIFIED - this token could not read their class:`);
+  if (unverified.length > 0 || checkedRepos < repoSlugs.length) {
+    console.log(`\nUNVERIFIED: ${checkedRepos} of ${repoSlugs.length} repositor(y/ies) checked.`);
     for (const u of unverified) console.log(`  ${u}`);
-    console.log('\nEverything else resolved. UNVERIFIED is not a pass (CLAUDE.md §4.4).');
+    console.log('\nEverything reachable resolved. A subset is not a pass (CLAUDE.md §4.4).');
     return 3;
   }
 
-  console.log('\nPASS  every label, environment, actor and team named in .github/ exists in ' + repoSlug);
+  console.log(`\nPASS  every label, environment, actor and team named in .github/ exists in all ${checkedRepos} repositor(y/ies): ${repoSlugs.join(', ')}`);
   return 0;
 }
 

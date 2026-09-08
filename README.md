@@ -7,6 +7,25 @@ blocks writes outside the repo you're in, `.env` reads, `rm -rf` above the proje
 pushes to `main`, and `curl | sh` — deterministically, in under a millisecond, with **no API key
 and no tokens**.
 
+> ### Free. Local. No account.
+>
+> Two people opened issues asking this before anything else, so it belongs here rather than in a
+> FAQ ([#9](https://github.com/djayamah/usewarden/issues/9),
+> [#14](https://github.com/djayamah/usewarden/issues/14)).
+>
+> - **It is free.** MIT licence. No paid tier, no account, no sign-up, no trial. `npm install -g
+>   usewarden` is the whole transaction.
+> - **It needs no API key.** The blocking is deterministic pattern and scope matching: zero
+>   tokens, zero API calls, on every event. The one thing that can ever cost money is the optional
+>   Layer 2 drift judge, and only if you hand it your own key for a paid API. Give it nothing and
+>   it says so and the blocking carries on.
+> - **Your code stays on your machine.** Layer 1 never leaves it. Telemetry is off by default and
+>   this version ships **no endpoint at all**, so there is nowhere for a payload to go. The single
+>   exception is that optional judge, which you switch on yourself, to a provider you pick, with
+>   your own key — and its input is redacted and length-capped before it goes.
+>
+> Longer answers in the [FAQ](#faq).
+
 ![Two incident cards from a real agent session: a Layer 1 block of `rm -rf` outside the repo, and the Layer 2 drift judge flagging the same action](assets/incident-card.png)
 
 *Real output from a real `claude --dangerously-skip-permissions` session. The agent read the

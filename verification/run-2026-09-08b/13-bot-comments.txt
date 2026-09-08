@@ -1,0 +1,30 @@
+=== BOT COMMENTS on both repos — anything addressed to us and unanswered? ===
+--- djayamah/warden ---
+--- djayamah/usewarden ---
+=== bot comments, including on closed PRs (issues endpoint above may not list PRs) ===
+--- djayamah/warden ---
+  1  dependabot[bot]  2026-08-19T13:33:49Z  ### Labels  The following labels could not be found: `dependencies`. Please create it befo
+  2  dependabot[bot]  2026-08-19T13:33:57Z  ### Labels  The following labels could not be found: `dependencies`. Please create it befo
+  3  dependabot[bot]  2026-08-26T04:17:06Z  ### Labels  The following labels could not be found: `dependencies`. Please create it befo
+  4  dependabot[bot]  2026-08-26T04:17:13Z  ### Labels  The following labels could not be found: `dependencies`. Please create it befo
+  5  dependabot[bot]  2026-09-02T04:15:32Z  ### Labels  The following labels could not be found: `dependencies`. Please create it befo
+  1  dependabot[bot]  2026-09-02T04:15:33Z  Superseded by #5.
+  5  dependabot[bot]  2026-09-08T00:19:53Z  Looks like @types/node is no longer being updated by Dependabot, so this is no longer need
+  2  dependabot[bot]  2026-09-08T00:19:53Z  Looks like typescript is no longer being updated by Dependabot, so this is no longer neede
+  7  dependabot[bot]  2026-09-08T00:20:26Z  ### Labels  The following labels could not be found: `dependencies`. Please create it befo
+  4  dependabot[bot]  2026-09-08T00:21:39Z  Looks like actions/checkout is up-to-date now, so this is no longer needed.
+  3  dependabot[bot]  2026-09-08T00:21:40Z  Looks like actions/setup-node is up-to-date now, so this is no longer needed.
+  7  dependabot[bot]  2026-09-08T00:55:56Z  Looks like actions/deploy-pages is up-to-date now, so this is no longer needed.
+--- djayamah/usewarden ---
+  1  dependabot[bot]  2026-08-19T16:22:54Z  ### Labels  The following labels could not be found: `dependencies`. Please create it befo
+  2  dependabot[bot]  2026-08-19T16:22:59Z  ### Labels  The following labels could not be found: `dependencies`. Please create it befo
+  9  github-actions[bot]  2026-08-20T11:44:23Z  Thanks for the report.  I could not match this to any failure mode I know about, so I have
+  14  github-actions[bot]  2026-08-21T09:10:32Z  Thanks for asking.  I could not find an answer to this in the published documents, so rath
+  25  dependabot[bot]  2026-08-26T02:34:11Z  ### Labels  The following labels could not be found: `dependencies`. Please create it befo
+  26  dependabot[bot]  2026-08-26T02:34:20Z  ### Labels  The following labels could not be found: `dependencies`. Please create it befo
+  31  dependabot[bot]  2026-09-02T02:34:12Z  ### Labels  The following labels could not be found: `dependencies`. Please create it befo
+  2  dependabot[bot]  2026-09-02T02:34:13Z  Superseded by #31.
+  31  dependabot[bot]  2026-09-07T23:46:59Z  OK, I won't notify you again about this release, but will get in touch when a new version 
+  1  dependabot[bot]  2026-09-08T00:08:27Z  OK, I won't notify you again about this release, but will get in touch when a new version 
+  25  dependabot[bot]  2026-09-08T00:46:13Z  OK, I won't notify you again about this release, but will get in touch when a new version 
+  26  dependabot[bot]  2026-09-08T00:46:15Z  OK, I won't notify you again about this release, but will get in touch when a new version 
