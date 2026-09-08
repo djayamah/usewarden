@@ -1,25 +1,25 @@
 === USEWARDEN FULL VERIFICATION PASS ===
-captured: 2026-08-19T17:32:48Z
-commit:   7a30cf2db8776a8acc78d9e3d766e9eba5603edb
+captured: 2026-08-20T10:11:41Z
+commit:   c09948598f452e4a28b544bd4d4decc91d801900
 branch:   main
 node:     v25.5.0   npm: 11.19.0
 
 --- clean build from scratch ---
-PASS  typescript build (strict, noUncheckedIndexedAccess)
+PASS  npm run build (strict, noUncheckedIndexedAccess)
 PASS  typecheck with no emit
 
 --- test suite, build machine ---
-  ℹ tests 247
-  ℹ suites 54
-  ℹ pass 247
+  ℹ tests 427
+  ℹ suites 84
+  ℹ pass 427
   ℹ fail 0
 PASS  full suite on v25.5.0
       Layer-1 catch rate: 15/17 = 88.2%
       missed (expected to be Layer-2 only): goal abandonment (L2), invariant violation (L2)
 
 --- test suite, LTS target (Node 22) ---
-  # tests 247
-  # pass 247
+  # tests 427
+  # pass 427
   # fail 0
 PASS  full suite on v22.22.0 (Active LTS)
 
@@ -45,7 +45,7 @@ PASS  usewarden telemetry status
 PASS  usewarden statusline
 
 --- live evidence on record ---
-  live catches from real agent sessions: 20 (requirement: >= 3)
+  live catches from real agent sessions: 22 (requirement: >= 3)
   metered judge spend: $0.0000 of $15.00 limit
   live session transcripts:
     verification/live/01-env-read.txt
@@ -60,29 +60,68 @@ PASS  usewarden statusline
     verification/live/08c-reprotected-session.txt
     verification/live/09-shell-injection.txt
     verification/live/10-rm-rf-outside.txt
+    verification/live/11-metrics-retry.txt
+    verification/live/12-dotenv-bypass-fixed.txt
+
+--- metrics: derived, consistent, and uninflatable ---
+PASS  two demo runs recorded 8 blocks and moved the headline by 0
+PASS  metrics integrity check holds (exit 0)
+
+--- documented counts match reality ---
+PASS  README states 427 tests and the suite runs 427
+
+--- pre-push guard (CLAUDE.md section 7, exception 1) ---
+  core.hooksPath = .githooks
+  PASS  public https URL refused (exit 1)
+  PASS  public ssh URL refused (exit 1)
+  PASS  public URL under a lying name (exit 1)
+  PASS  no URL is refused (fail closed) (exit 1)
+  PASS  private origin allowed (exit 0)
+  PASS  private ssh origin allowed (exit 0)
+  === git hooks installed and PROVEN ===
+PASS  the public repository cannot be pushed to
+
+--- support bot: the eval set and the scope document ---
+PASS  support-bot eval: retrieval 20 20, end-to-end 20 20
+PASS  ops/BOT-SCOPE.md documents the blast radius
+
+--- built but NOT deployed ---
+PASS  no deploy artifact for the service or the site
+PASS  the client ships no telemetry endpoint
 
 --- documentation completeness ---
-PASS  README.md (384 lines)
-PASS  SECURITY.md (91 lines)
+PASS  README.md (575 lines)
+PASS  SECURITY.md (93 lines)
 PASS  LICENSE (21 lines)
 PASS  CONTRIBUTING.md (103 lines)
-PASS  DECISIONS.md (648 lines)
+PASS  DECISIONS.md (1306 lines)
 PASS  .github/workflows/ci.yml (124 lines)
 PASS  .github/workflows/release.yml (85 lines)
 PASS  .github/pull_request_template.md (29 lines)
 PASS  .github/ISSUE_TEMPLATE/bug_report.yml (66 lines)
 PASS  .github/ISSUE_TEMPLATE/agent_support.yml (40 lines)
-PASS  assets/incident-card.png (257 lines)
-PASS  assets/dashboard.png (725 lines)
-PASS  docs/HOOK-MATRIX.md (250 lines)
-PASS  docs/THREAT-MODEL.md (67 lines)
-PASS  docs/DEPENDENCY-BUDGET.md (83 lines)
-PASS  docs/TELEMETRY.md (84 lines)
+PASS  assets/incident-card.png (430 lines)
+PASS  assets/dashboard.png (770 lines)
+PASS  docs/HOOK-MATRIX.md (267 lines)
+PASS  docs/THREAT-MODEL.md (70 lines)
+PASS  docs/DEPENDENCY-BUDGET.md (112 lines)
+PASS  docs/TELEMETRY.md (138 lines)
+PASS  docs/METRICS.md (262 lines)
+PASS  docs/BOT-COSTS.md (68 lines)
+PASS  service/README.md (164 lines)
+PASS  site/README.md (55 lines)
+PASS  site/index.html (336 lines)
+PASS  ops/BOT-SCOPE.md (93 lines)
+PASS  ops/DASHBOARD.md (82 lines)
+PASS  ops/X-BOT-SETUP.md (83 lines)
+PASS  launch/HN-COMMENT-PREP.md (93 lines)
+PASS  launch/REDDIT-PRESENCE.md (74 lines)
+PASS  launch/DISCOVERABILITY.md (109 lines)
 PASS  ops/JUDGE-LIVE-CHECK.md (146 lines)
-PASS  CLAUDE.md (104 lines)
-PASS  PROGRESS.md (442 lines)
+PASS  CLAUDE.md (173 lines)
+PASS  PROGRESS.md (537 lines)
 PASS  launch/NAME-CANDIDATES.md (107 lines)
-PASS  launch/POSTS.md (310 lines)
+PASS  launch/POSTS.md (375 lines)
 PASS  launch/PUBLISH-CHECKLIST.md (95 lines)
 PASS  launch/RULES-REGISTRY.md (67 lines)
 

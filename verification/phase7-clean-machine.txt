@@ -57,15 +57,15 @@ pre-existing ~/.claude/settings.json sha256: edbb7614931c0844ad262c638a5b63670fd
   usewarden  UNPROTECTED
 
   AGENT               STATE        CONFIG
-  Claude Code (user)  UNPROTECTED  /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/.claude/settings.json
+  Claude Code (user)  UNPROTECTED  /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/you/settings.json
 
   Claude Code: usewarden has never registered hooks for this agent. Run: usewarden init
 
 
 --- 4. usewarden init ---
 
-Applied. Backup: /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/.usewarden/backups/2026-08-19T13-19-33-335Z
-Undo with: usewarden restore-configs "/var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/.usewarden/backups/2026-08-19T13-19-33-335Z"
+Applied. Backup: /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/you/backups/2026-08-19T13-19-33-335Z
+Undo with: usewarden restore-configs "/var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/you/backups/2026-08-19T13-19-33-335Z"
 
 ┌────────────────────────────────────────────────────────────────────────┐
 │ Protection summary                                                     │
@@ -91,7 +91,7 @@ settings.json sha256 after init: 950de7ebf257ffd61806acabfed7f125cdf623c881ac311
   usewarden  PROTECTED
 
   AGENT               STATE      CONFIG
-  Claude Code (user)  PROTECTED  /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/.claude/settings.json
+  Claude Code (user)  PROTECTED  /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/you/settings.json
 
   exit code = 0  (0 == protected)
 
@@ -116,18 +116,18 @@ settings.json sha256 after init: 950de7ebf257ffd61806acabfed7f125cdf623c881ac311
 
 --- 7. usewarden uninstall ---
 Removed usewarden hook entries from:
-  /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/.claude/settings.json
+  /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/you/settings.json
 
-Original configs are still in /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/.usewarden/backups/2026-08-19T13-19-33-335Z - "usewarden restore-configs" puts them back byte-identically.
+Original configs are still in /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/you/backups/2026-08-19T13-19-33-335Z - "usewarden restore-configs" puts them back byte-identically.
 
 sha256 before init:      edbb7614931c0844ad262c638a5b63670fd3be62f89de5d4fbc8cfb9a750a3f7
 sha256 after uninstall:  edbb7614931c0844ad262c638a5b63670fd3be62f89de5d4fbc8cfb9a750a3f7
   PASS - byte-identical
 
 --- 8. usewarden restore-configs (the bigger hammer) ---
-  restore from /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/.usewarden/backups/2026-08-19T13-19-33-773Z
+  restore from /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/you/backups/2026-08-19T13-19-33-773Z
   
-  OK   restored  /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/.claude/settings.json
+  OK   restored  /var/folders/2n/bh92p8cn5zx3lwmqp8jmvttc0000gn/T/tmp.D7lH73UABS/home/you/settings.json
   
   Every config restored byte-identically.
 sha256 after restore-configs: edbb7614931c0844ad262c638a5b63670fd3be62f89de5d4fbc8cfb9a750a3f7

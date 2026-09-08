@@ -1,0 +1,19 @@
+=== 1. THE CORPUS IS NOT IN THE OFFSITE BACKUP'S TARGET LIST ===
+Checked: ~/scripts/mac-backup.sh TARGETS[] on 2026-08-26T09:46:39Z
+
+-- does any TARGET name .usewarden? --
+occurrences of "usewarden" in mac-backup.sh: 0
+
+-- is $HOME/dev a TARGET? --
+58:  "$HOME/dev"
+
+-- would any --exclude hit corpus-backup/? --
+[REDACTED-FORBIDDEN-PATH]
+87:  --exclude "**/node_modules"
+88:  --exclude "**/.venv"
+89:  --exclude "**/.next"
+90:  --exclude "**/.pytest_cache"
+91:  --exclude "**/.ruff_cache"
+92:  --exclude "**/.dist"
+93:  --exclude "**/.DS_Store"
+94:  --exclude "**/*.tsbuildinfo"

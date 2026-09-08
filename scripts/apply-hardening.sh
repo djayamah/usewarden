@@ -30,10 +30,24 @@ else
   say FAILED "repository settings: $(printf '%s' "$OUT" | head -1)"
 fi
 
-for ep in vulnerability-alerts automated-security-fixes; do
+# `private-vulnerability-reporting` was added on 2026-08-20 after it was found DISABLED while
+# SECURITY.md already named it the preferred disclosure route - so the project had no working
+# security channel at all. It is the whole channel now: SECURITY.md publishes no email address.
+for ep in vulnerability-alerts automated-security-fixes private-vulnerability-reporting; do
   if gh api -X PUT "repos/$REPO_SLUG/$ep" >/dev/null 2>&1; then say OK "$ep enabled"
   else say FAILED "$ep could not be enabled"; fi
 done
+
+# Secret scanning and push protection are free on a public repository and were both off. Push
+# protection is the one that matters most here: it refuses a commit that CONTAINS a credential,
+# which is a control usewarden's own threat model would insist on for anyone else.
+if OUT="$(gh api -X PATCH "repos/$REPO_SLUG" \
+      -f 'security_and_analysis[secret_scanning][status]=enabled' \
+      -f 'security_and_analysis[secret_scanning_push_protection][status]=enabled' 2>&1)"; then
+  say OK "secret scanning + push protection enabled"
+else
+  say FAILED "secret scanning: $(printf '%s' "$OUT" | head -1)"
+fi
 
 # --- branch ruleset --------------------------------------------------------
 echo

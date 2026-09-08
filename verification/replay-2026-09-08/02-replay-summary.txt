@@ -1,0 +1,14 @@
+  unchanged    #106 $ cd ~/dev/REDACTED-app && grep -rn "on their own\|tuck away\|tuckAway\|onTheirOwn" web/ --inc…
+                judge.drift → allow
+  unchanged    #107 $ cd ~/dev/REDACTED-app && grep -n "lw-button" web/app/globals.css | head -8; echo "=== .shots…
+                judge.drift → allow
+
+SUMMARY
+  blocked then          92
+  blocked now           60
+  unchanged             70
+  now allowed           32
+  newly blocked         0
+  same block, new rule  1
+  indeterminate         0
+  unreplayable          0

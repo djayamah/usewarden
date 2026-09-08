@@ -3,8 +3,9 @@ import * as fs from 'node:fs';
 import type { NormalizedEvent, Verdict } from '../types.js';
 import type { Policy } from '../policy/schema.js';
 import { ALLOW } from '../types.js';
-import { isInside, matchesAnyGlob, resolveUserPath, ellipsis, oneLine } from '../util.js';
+import { isInside, isEphemeralPath, matchesAnyGlob, resolveUserPath, ellipsis, oneLine } from '../util.js';
 import { findRepoRoot } from '../policy/load.js';
+import { lex, unquote, verbOf, type Lex, type HeredocSpan, type Word } from './shlex.js';
 import { gitFileState, isUnrecoverable } from './gitstate.js';
 import { findException, remaining, type Exception } from '../exceptions.js';
 
@@ -42,6 +43,49 @@ export interface Layer1Context {
    * SOMEONE ELSE did". The caller answers it from the session's own event history.
    */
   agentAuthored?: boolean;
+  /**
+   * `live` (default) lets the checks below consult the filesystem. `fenced` forbids it.
+   *
+   * REPLAY IS THE REASON THIS EXISTS, AND IT IS A SAFETY FENCE BEFORE IT IS A CORRECTNESS ONE.
+   *
+   * Two checks here read the disk: `gitFileState` (protect_uncommitted) and `siblingRepoOf`
+   * (message enrichment on an out-of-scope write). A replay re-evaluates STORED actions, and the
+   * paths in a stored action are whatever the agent typed months ago - on this machine, that
+   * corpus contains paths CLAUDE.md §1 forbids this repository's tooling from touching at all.
+   * A replay that stat()ed its own corpus would walk straight into them, and would do it
+   * silently, because `fs.existsSync` on a forbidden path returns a boolean rather than an error.
+   *
+   * It is also the correct answer on the merits. Replaying a write from August against today's
+   * git index measures today's checkout, not the incident.
+   *
+   * The two checks are fenced DIFFERENTLY, and the difference is the honest part:
+   *   - `siblingRepoOf` only decorates a message, so skipping it cannot change a verdict. Skipped
+   *     silently.
+   *   - `gitFileState` DECIDES a verdict, so skipping it would turn a block into an allow and
+   *     quietly flatter every precision figure computed downstream. It is reported through
+   *     `onUnevaluable` instead, and the replay marks that row INDETERMINATE rather than
+   *     counting it as either a pass or a fail. CLAUDE.md §4.4.
+   */
+  filesystem?: 'live' | 'fenced';
+  /** Called when a check could not be evaluated. See `filesystem`. */
+  onUnevaluable?: (rule: string, why: string) => void;
+  /**
+   * The two filesystem probes Layer 1 makes, injectable.
+   *
+   * They are parameters rather than direct imports for ONE reason: it is the only way to write a
+   * test that PROVES the fence holds. `fs` reached through an ESM import is a frozen namespace
+   * object, so a test cannot spy on it; a test that instead asserted "the verdict looks right"
+   * would pass just as happily if the fence had been deleted. With the probes injected,
+   * `tests/replay.test.ts` R4 hands in stubs that throw, and the fenced path is proved by the
+   * call not throwing - while the same stubs in `live` mode DO throw, which is what keeps that
+   * assertion from being vacuous.
+   */
+  probes?: Layer1Probes;
+}
+
+export interface Layer1Probes {
+  gitFileState: typeof gitFileState;
+  siblingRepoOf: typeof siblingRepoOf;
 }
 
 export function evaluateLayer1(e: NormalizedEvent, ctx: Layer1Context): Verdict {
@@ -93,10 +137,30 @@ function evaluateLayer1Raw(e: NormalizedEvent, ctx: Layer1Context): Verdict {
       // --- 2. out-of-scope writes -----------------------------------------------------
       const mutating = e.tool === 'write' || e.tool === 'edit';
       if (mutating && p.scope.allowed_paths.length > 0) {
-        const inScope = p.scope.allowed_paths.some((a) => isInside(resolveUserPath(a, base), abs)
+        // The agent's own scratchpad is in scope when `allow_ephemeral` is on.
+        //
+        // THE SECOND HALF OF THIS CONDITION IS NOT BELT AND BRACES, IT IS THE FENCE. The
+        // forbidden-path veto above resolves each glob against the REPOSITORY, so `**/.env`
+        // becomes `<repo>/**/.env` and protects nothing outside the repository. Under
+        // `allowed_paths` that never mattered - everything outside was refused anyway. Exempting
+        // the scratchpad removed that backstop, and a `.env` written into a scratchpad would have
+        // slipped through a rule whose whole point is that it is absolute. Caught by test E3,
+        // which was written to assert the claim the comment here was making, and initially failed.
+        //
+        // Re-testing the forbidden globs anchored at `/` is what makes `**/.env` mean what it
+        // plainly says: any .env, anywhere.
+        const ephemeral = p.scope.allow_ephemeral
+          && isEphemeralPath(abs)
+          && !matchesAnyGlob(abs, p.scope.forbidden_paths, '/');
+        const inScope = ephemeral
+          || p.scope.allowed_paths.some((a) => isInside(resolveUserPath(a, base), abs)
           || matchesAnyGlob(abs, [a], base));
         if (!inScope) {
-          const sibling = siblingRepoOf(ctx.repoRoot, abs);
+          // Message enrichment only - see Layer1Context.filesystem. Skipping it under the fence
+          // cannot change the verdict, only the sentence.
+          const sibling = ctx.filesystem === 'fenced'
+            ? null
+            : (ctx.probes?.siblingRepoOf ?? siblingRepoOf)(ctx.repoRoot, abs);
           const extra = sibling
             ? ` That path is inside a DIFFERENT repository (${path.basename(sibling)}) sitting beside this one.`
             : '';
@@ -129,27 +193,35 @@ function evaluateLayer1Raw(e: NormalizedEvent, ctx: Layer1Context): Verdict {
       // it happen. `checkpoint.auto` does not cover this either - it tags HEAD, which is exactly
       // the work that was already safe.
       if (p.scope.protect_uncommitted && e.tool === 'write' && !ctx.agentAuthored && ctx.repoRoot) {
-        const state = gitFileState(abs, ctx.repoRoot);
-        if (isUnrecoverable(state)) {
-          // REPO-RELATIVE, NOT THE BASENAME. The first version suggested `git add todos.js` for a
-          // file at `src/todos.js`, which fails from the repository root - a message telling the
-          // agent to run a command that does not work. A live session caught it by ignoring the
-          // command and running the right one; the next agent might not.
-          const name = path.relative(ctx.repoRoot, abs) || path.basename(abs);
-          const untracked = state === 'untracked';
-          return {
-            decision: 'deny',
-            reason: untracked
-              // "Commit or stash it first (`git add ...`)" was the first wording, and a live
-              // session showed the seam: `git add` is neither a commit nor a stash. The agent
-              // followed the parenthetical, which was the right action - so the message now says
-              // what that action actually achieves instead of mislabelling it.
-              ? `Usewarden: ${name} exists and git has never seen it, so the copy on disk is the only one. Replacing it wholesale would destroy work nobody can get back. Put the current contents somewhere recoverable first — \`git add ${name}\` is enough — or write to a different file.`
-              : `Usewarden: ${name} has uncommitted changes that git cannot restore. Replacing the whole file would discard them. Stage or commit them first (\`git add ${name}\`), or make a targeted edit that keeps what is already there.`,
-            rule: `scope.protect_uncommitted (${state})`,
-            layer: 1,
-            severity: 'block',
-          };
+        if (ctx.filesystem === 'fenced') {
+          // NOT an allow. The caller is told the check could not run, and is expected to report
+          // the row as indeterminate. Falling through to ALLOW here would have been one line
+          // shorter and would have made every replayed write look like a clean pass.
+          ctx.onUnevaluable?.('scope.protect_uncommitted',
+            'needs the git index and working tree as they were; the filesystem is fenced');
+        } else {
+          const state = (ctx.probes?.gitFileState ?? gitFileState)(abs, ctx.repoRoot);
+          if (isUnrecoverable(state)) {
+            // REPO-RELATIVE, NOT THE BASENAME. The first version suggested `git add todos.js` for a
+            // file at `src/todos.js`, which fails from the repository root - a message telling the
+            // agent to run a command that does not work. A live session caught it by ignoring the
+            // command and running the right one; the next agent might not.
+            const name = path.relative(ctx.repoRoot, abs) || path.basename(abs);
+            const untracked = state === 'untracked';
+            return {
+              decision: 'deny',
+              reason: untracked
+                // "Commit or stash it first (`git add ...`)" was the first wording, and a live
+                // session showed the seam: `git add` is neither a commit nor a stash. The agent
+                // followed the parenthetical, which was the right action - so the message now says
+                // what that action actually achieves instead of mislabelling it.
+                ? `Usewarden: ${name} exists and git has never seen it, so the copy on disk is the only one. Replacing it wholesale would destroy work nobody can get back. Put the current contents somewhere recoverable first — \`git add ${name}\` is enough — or write to a different file.`
+                : `Usewarden: ${name} has uncommitted changes that git cannot restore. Replacing the whole file would discard them. Stage or commit them first (\`git add ${name}\`), or make a targeted edit that keeps what is already there.`,
+              rule: `scope.protect_uncommitted (${state})`,
+              layer: 1,
+              severity: 'block',
+            };
+          }
         }
       }
     }
@@ -274,10 +346,62 @@ export function commandTargetsOnlyAllowedPaths(cmd: string, p: Policy, base: str
   const args = tokenize(cmd).filter((t) => !t.startsWith('-'));
   const candidates = args.slice(1).filter((a) => a !== '');
   if (candidates.length === 0) return false;
+
+  // A SHELL OR AN INTERPRETER TAKES PROGRAMS, NOT PATHS — and reading one as the other was a
+  // hole, not an annoyance. FOUND 2026-09-08 by a sabotage test written for a different fix, and
+  // confirmed against the shipped engine before changing anything:
+  //
+  //     sh -c 'rm -rf /'        -> ALLOW
+  //     bash -c 'rm -rf /etc'   -> ALLOW
+  //
+  // `tokenize` strips the quotes, so the whole program became a single token `rm -rf /`, which
+  // `resolveUserPath` then resolved RELATIVE TO THE REPOSITORY into `<repo>/rm -rf /` — a path
+  // inside the allowed scope. Every candidate looked in-scope, so `outsideRepoOnly` skipped the
+  // recursive-delete rule entirely. The guard's own doctrine is that an argument it cannot
+  // classify counts as OUTSIDE; the defect was that it classified this one, confidently and
+  // wrongly.
+  //
+  // The check is at the front rather than inside the loop because it is about the VERB, not about
+  // any one argument: nothing this function can learn from the arguments of `sh -c` is a path.
+  // A RUNNER PREFIX IS NOT THE PROGRAM. `sh -c` was fixed above; `env sh -c`, `nice sh -c`,
+  // `timeout 5 sh -c`, `nohup sh -c`, `find . -exec sh -c` and eighteen more shapes were not, and
+  // every one of them was still ALLOW after that fix. MEASURED 2026-09-08 against the bytes
+  // published to npm as 0.1.1 and against the committed HEAD, both, in
+  // `verification/escape-class-2026-09-08/`: 41 of 48 wrapped forms allowed on 0.1.1, 24 of 48
+  // still allowed on the "fixed" engine.
+  //
+  // The four that 0.1.1 happened to refuse — `flock`, `script`, `chroot`, `make` — refused for a
+  // reason that had nothing to do with the escape: one of the RUNNER's own arguments (`/tmp/l`,
+  // `/dev/null`, `/`) resolved outside the repository. Change it to an in-repo path and all four
+  // allow, which is what `matrix2-result.txt` records. So the previous coverage was not partial;
+  // it was accidental, and a defence that works by accident is a defence that stops working when
+  // somebody types a different filename.
+  //
+  // The effective verb is therefore resolved by walking PAST any runner prefix before the shell
+  // test is applied.
+  const verb = effectiveVerb(args);
+  if (SHELL_VERBS.has(verb) || FOREIGN_INTERPRETERS.has(verb)) return false;
   for (const a of candidates) {
+    // A TOKEN WITH A SPACE IN IT IS A PROGRAM STRING, NOT A PATH THIS FUNCTION SHOULD TRUST.
+    //
+    // The second, independent fence, and the one that does not depend on knowing every runner's
+    // name. `tokenize` strips quotes, so `-c 'rm -rf /'` arrives here as the single token
+    // `rm -rf /`, which `resolveUserPath` cheerfully turns into `<repo>/rm -rf /` — a path inside
+    // the allowed scope. That resolution is the mechanism of EVERY escape in the matrix, whatever
+    // the verb, including the ones nobody has thought of yet.
+    //
+    // The cost is a path that genuinely contains a space, which stops being waved through and is
+    // evaluated against the deny rules instead. Measured on the frozen 92-block label set: zero
+    // change to precision or coverage.
+    if (/\s/.test(a)) return false;
     if (/[$`*?]/.test(a)) return false;         // unresolvable or glob: assume dangerous
     if (a === '/' || a === '~' || a === '~/') return false;
     const abs = resolveUserPath(a, base);
+    // Checked AFTER the unresolvable test above, deliberately: `rm -rf "$T"` stays dangerous even
+    // though $T usually holds a temp path, because usually is not always. The forbidden-glob
+    // re-test is the same fence as in the scope branch - see the note there.
+    if (p.scope.allow_ephemeral && isEphemeralPath(abs)
+        && !matchesAnyGlob(abs, p.scope.forbidden_paths, '/')) continue;
     const inScope = p.scope.allowed_paths.some((al) => isInside(resolveUserPath(al, base), abs));
     if (!inScope) return false;
   }
@@ -445,94 +569,312 @@ export function statements(cmd: string): string[] {
  *                                 command was refused — the fourth time this guard blocked its
  *                                 own author writing prose in one day
  *
- * Next would have been `gh pr create --body-file -`, `mail`, `jq`, `sqlite3 <<EOF`, and whatever
- * anyone thinks of after that. This is precisely the shape D-081 named about the `.env` readers:
- * *"a denylist of readers is a list that is wrong the moment it is written"* — the same mistake
- * with the polarity flipped.
- *
  * So the polarity is inverted, the way the .env check already inverts it. A heredoc body is DATA
- * unless the line that opens it names something that would EXECUTE it. That is an allowlist of
- * dangerous rather than an allowlist of safe, and the list of interpreters is short, stable and
- * enumerable in a way the list of file-writing commands is not.
+ * unless something will EXECUTE it. That is an allowlist of dangerous rather than an allowlist of
+ * safe, and the list of interpreters is short, stable and enumerable in a way the list of
+ * file-writing commands is not.
  *
- * RESIDUAL RISK, STATED RATHER THAN HIDDEN: a command that executes its heredoc without naming a
- * recognised interpreter — `docker run img <<EOF`, or `$SHELL <<EOF` — has its body treated as
- * data. That is a real gap and it is narrower than the one it replaces: scope still governs every
- * write, the pipe-to-shell case is still caught because the interpreter is on the same line, and
- * the alternative was a guard that refuses documentation about its own subject matter.
- */
-/**
- * Anything that would EXECUTE heredoc text. If one of these appears anywhere in the command line
- * the body is treated as code, which covers `cat <<EOF | bash` — where the leading word is a data
- * sink but the body is executed anyway.
- */
-const INTERPRETERS =
-  /\b(ba|z|k|da|fi)?sh\b|\bpython3?\b|\bnode\b|\bruby\b|\bperl\b|\bphp\b|\bpsql\b|\bmysql\b|\bsqlite3?\b|\bawk\b|\bsed\b|\beval\b|\bxargs\b|\bsource\b/;
-
-/**
- * Remove heredoc BODIES that are being written as data, so command patterns are matched against
- * what the shell will RUN rather than against text it will merely store.
+ * WHAT CHANGED ON 2026-09-08 (D-279), and why it is a correction rather than a loosening.
  *
- * WHY THIS EXISTS — D-139, and it cost real work twice in one day.
+ * The consumer used to be identified by testing a regex against the whole opener LINE. Two
+ * defects followed, and between them they accounted for 14 of the 29 false positives left in the
+ * labelled corpus:
  *
- * `statements()` splits on newlines, so every line of a heredoc body becomes a statement the deny
- * rules are matched against. That is correct for `bash <<EOF`, where those lines are executed. It
- * is wrong for `cat > notes.md <<EOF`, where they are file contents — and the consequence was that
- * usewarden blocked its own maintainer from writing a release runbook because the prose contained
- * the words `npm publish`, and later from writing a security TEST FIXTURE because it contained
- * `rm -rf ~/`. A guardrail that cannot tell a command from a sentence about a command will
- * eventually block a user writing documentation, and they will not file a bug, they will uninstall.
+ *   1. `cat > scripts/restore-check.sh <<'SHEOF'` was read as naming a shell, because
+ *      `\b(ba|z|k|da|fi)?sh\b` matches the `.sh` on a FILENAME. POSIX §2.9.1.1 says the command
+ *      name is "the first field ... that is not a variable assignment or redirection". A suffix
+ *      on a redirection target is not a command. The consumer is now the command-position word,
+ *      from the lexer.
  *
- * This is the using-versus-naming distinction (D-091) that `botProseOnly` already applies to the
- * triage bot's quotations, applied to shell text.
+ *   2. A body handed to `python3 - <<'PY'` was scanned in full whenever it contained a BACKTICK,
+ *      because backticks are command substitution — in shell. They are not in Python, they are a
+ *      syntax error; and in Markdown prose, which is what these bodies mostly were, they are a
+ *      code span. Twelve blocks, every one of them an agent writing documentation.
  *
- * IT FAILS CLOSED, three ways over:
- *   - only `cat` and `tee` heredocs are treated as data; anything else is scanned in full;
- *   - if any interpreter appears anywhere in the command, nothing is stripped;
- *   - if the closing delimiter is never found, nothing is stripped, because an unterminated
- *     heredoc means this function did not understand the command.
+ *      POSIX §2.7.4 settles the general case and settles it more strongly than the special case
+ *      needed: when the here-document delimiter is quoted — `<<'PY'`, which every one of those
+ *      twelve used — "the here-document lines shall not be expanded". No parameter expansion, no
+ *      command substitution, no arithmetic. A backtick inside `<<'PY'` is a literal backtick as a
+ *      matter of the shell grammar, not as a matter of our judgement. With an UNQUOTED delimiter
+ *      all three expansions do happen, so that case still fails closed.
+ *
+ * IT STILL FAILS CLOSED, four ways:
+ *   - the lexer returns `ok: false` for anything it does not understand — an unbalanced quote, an
+ *     unterminated heredoc, a command substitution it would have to recurse into — and this
+ *     function then strips NOTHING and behaves exactly as it did before;
+ *   - a body whose consumer is a shell is never stripped;
+ *   - a body handed to a non-shell interpreter is stripped only when it contains no route back to
+ *     a shell IN THAT LANGUAGE;
+ *   - `cat <<EOF | bash` is still caught, because `bash` is at a command position after the pipe.
  *
  * Writing a file is still governed by SCOPE, which is unaffected: `cat > /etc/passwd <<EOF` is
- * refused for its target, not its contents. This only stops the CONTENTS being read as commands.
+ * refused for its target, not its contents.
  */
-export function stripDataHeredocs(cmd: string): string {
-  if (!cmd.includes('<<')) return cmd;
 
-  const lines = cmd.split('\n');
-  const out: string[] = [];
+/** Anything that would execute heredoc text AS SHELL. */
+/**
+ * Commands whose own argument is ANOTHER PROGRAM rather than a file.
+ *
+ * `env`, `nice` and `timeout` do not open the things you hand them; they exec them. So the verb
+ * that decides whether this command's arguments are paths is not the first word, it is the first
+ * word that is not one of these. Deliberately generous — a name that merely looks like a runner
+ * costs at worst a skipped optimisation, and a missing one costs a hole, which is the same
+ * asymmetry FOREIGN_INTERPRETERS is written for.
+ *
+ * `sudo` and `su` are here for completeness of the walk; usewarden has its own rule about them.
+ */
+const RUNNER_VERBS = new Set([
+  'env', 'nice', 'ionice', 'nohup', 'setsid', 'stdbuf', 'command', 'builtin', 'exec', 'time',
+  'timeout', 'watch', 'script', 'flock', 'chroot', 'setarch', 'unbuffer', 'strace', 'ltrace',
+  'dtruss', 'sudo', 'doas', 'su', 'parallel', 'find', 'ssh', 'npx', 'pnpm', 'yarn', 'bunx',
+  'git', 'make', 'proot', 'firejail', 'systemd-run', 'runuser',
+]);
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? '';
-    out.push(line);
-
-    // THE HEREDOC MAY OPEN ON ANY LINE, NOT THE FIRST.
-    //
-    // The first version of this only examined line 0, so a script whose first line was `cd …`
-    // and whose third line was `cat > notes.md <<EOF` got no stripping at all. Found the third
-    // time this guard blocked its own author writing documentation — which is the same defect
-    // this function exists to fix, one level up.
-    const open = /<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/.exec(line);
-    if (!open) continue;
-
-    // PER LINE, and that is deliberate rather than lazy. The hazard being guarded is
-    // `cat <<EOF | bash`, where the interpreter sits on the same line as the redirect — so a
-    // per-line check closes it. Checking the whole command instead would mean one `node` anywhere
-    // in a long script disabled stripping everywhere in it, which is how a narrow guard becomes a
-    // broad one nobody can reason about.
-    if (INTERPRETERS.test(line)) continue;
-
-    const delim = open[2]!;
-    let end = -1;
-    for (let j = i + 1; j < lines.length; j++) {
-      if ((lines[j] ?? '').trim() === delim) { end = j; break; }
+/**
+ * The verb whose arguments actually are paths, found by walking past every runner prefix.
+ *
+ * Tokens skipped along the way: `VAR=VALUE` assignments (`env FOO=1 sh -c …`), bare numbers and
+ * durations (`timeout 5 …`, `nice 10 …`), and `find`'s `-exec` sentinels. Everything else ends the
+ * walk. Bounded to eight hops so a pathological command cannot spin.
+ */
+export function effectiveVerb(args: readonly string[]): string {
+  let i = 0;
+  let hops = 0;
+  const basename = (t: string): string => t.split('/').pop() ?? '';
+  while (i < args.length && hops < 8) {
+    const v = basename(args[i] ?? '');
+    if (!RUNNER_VERBS.has(v)) return v;
+    hops++;
+    i++;
+    while (i < args.length) {
+      const t = args[i] ?? '';
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) { i++; continue; }   // env assignment
+      if (/^[0-9]+(\.[0-9]+)?[smhd]?$/.test(t)) { i++; continue; } // timeout/nice duration
+      if (t === '{}' || t === ';' || t === '+' || t === '.') { i++; continue; } // find sentinels
+      break;
     }
-    // Unterminated: do not guess. Leave the rest of the command to be scanned in full.
-    if (end === -1) continue;
+  }
+  return basename(args[i] ?? '');
+}
 
-    // Skip the body. The delimiter line itself is dropped with it: it is shell punctuation, and
-    // a lone `EOF` matches nothing anyway.
-    i = end;
+const SHELL_VERBS = new Set([
+  'sh', 'bash', 'zsh', 'ksh', 'dash', 'fish', 'eval', 'source', '.', 'xargs', 'awk', 'sed',
+]);
+
+/**
+ * Interpreters whose input is source in ANOTHER language. A body handed to one of these is not
+ * shell, so matching shell deny patterns against it is a category error (D-256).
+ */
+const FOREIGN_INTERPRETERS = new Set([
+  'python', 'python2', 'python3', 'node', 'nodejs', 'ruby', 'perl', 'php', 'deno', 'bun',
+]);
+
+/**
+ * Ways OUT of each of those languages and back into a shell.
+ *
+ * PER LANGUAGE, and that is the fix rather than an elaboration of it. The single combined list
+ * treated a backtick as an escape everywhere, which is true in Ruby, Perl and PHP and false in
+ * Python and JavaScript — and false is the common case, because these bodies are usually source
+ * code or Markdown. Each list stays deliberately generous: a name that merely LOOKS like one of
+ * these costs a false positive, and a missing one costs a hole.
+ */
+const SHELL_ESCAPES_BY_LANGUAGE: Record<string, RegExp> = {
+  python: /\bos\.system\b|\bsubprocess\b|\bos\.popen\b|\bcommands\.getoutput\b|\bpty\.spawn\b|\bos\.exec\w*\b|\bos\.spawn\w*\b/i,
+  node: /\bchild_process\b|\bexecSync\b|\bspawnSync\b|\bexecFile\w*\b|\bspawn\s*\(|\bexec\s*\(|\bnode:child_process\b/i,
+  ruby: /`[^`]*`|%x[({[|!]|\bsystem\s*\(|\bexec\s*\(|\bIO\.popen\b|\bKernel\.\w+|\bOpen3\b/i,
+  perl: /`[^`]*`|\bqx[({/|!]|\bsystem\s*\(|\bexec\s*\(|\bopen\s*\([^)]*\|/i,
+  php: /\bshell_exec\b|\bpassthru\b|\bproc_open\b|\bsystem\s*\(|\bexec\s*\(|`[^`]*`|\bpopen\s*\(/i,
+};
+
+function languageOf(verb: string): string | null {
+  if (verb.startsWith('python')) return 'python';
+  if (verb === 'node' || verb === 'nodejs' || verb === 'deno' || verb === 'bun') return 'node';
+  if (verb === 'ruby') return 'ruby';
+  if (verb === 'perl') return 'perl';
+  if (verb === 'php') return 'php';
+  return null;
+}
+
+/**
+ * Can this body be treated as data even though a foreign interpreter will read it?
+ *
+ * Exported and separately tested because it is the one place where "this is source, not shell"
+ * is decided, and getting it wrong in the permissive direction is the failure D-139 named.
+ */
+export function bodyIsForeignSource(verb: string, body: string): boolean {
+  // FAIL CLOSED ON A MISUSE, not just on a dangerous body.
+  //
+  // This used to take the whole opener LINE and do its own shell detection. It now takes a bare
+  // verb, because the shell-versus-foreign decision needs the lexer's command positions and no
+  // regex over a line can supply them. A caller that passes the old argument — `"python3 -c 'x'
+  // <<'PY' | sh"` — would otherwise match `startsWith('python')` and be told the body is inert,
+  // which is the exact pipe-to-shell hole the sabotage suite exists to guard. A verb has no
+  // whitespace and no metacharacters; anything else is a misuse and gets `false`.
+  if (!/^[A-Za-z_][A-Za-z0-9_.+-]*$/.test(verb)) return false;
+  const lang = languageOf(verb);
+  if (!lang) return false;
+  const escapes = SHELL_ESCAPES_BY_LANGUAGE[lang];
+  return escapes !== undefined && !escapes.test(body);
+}
+
+/**
+ * Commands that CANNOT execute an argument, so a dangerous string quoted as one of their
+ * arguments is text they are carrying rather than a command about to run.
+ *
+ * `grep -n 'npm publish' CLAUDE.md` searches FOR the phrase. Eight blocks in the labelled corpus
+ * were exactly this shape, several of them while the agent was reading this project's own policy.
+ *
+ * ALLOWLIST, not a denylist, and short on purpose. `sed` and `awk` are absent although they look
+ * like they belong: both execute a program of their own, and GNU sed's `e` command runs a shell.
+ * `xargs` is absent for the obvious reason. Anything not named here keeps today's behaviour.
+ */
+const INERT_VERBS = new Set([
+  'grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack', 'ripgrep',
+  'echo', 'printf', 'comm', 'diff', 'sort', 'uniq', 'wc', 'cut', 'tr',
+  'basename', 'dirname', 'column', 'fold', 'nl', 'rev', 'paste', 'join', 'jq',
+]);
+
+/** `git commit -m "..."` carries a message. These subcommands take prose and run none of it. */
+const GIT_MESSAGE_SUBCOMMANDS = new Set(['commit', 'tag', 'merge', 'notes', 'stash', 'revert']);
+
+/** Flags whose VALUE is a program in the interpreter's own language, not shell. */
+const EVAL_FLAGS = new Set(['-e', '-c', '-r', '--eval', '--execute', '-p', '-E']);
+
+/**
+ * Blanks out every span of a command that the shell will NOT execute, preserving offsets.
+ *
+ * This is the single concept the three 2026-09-08 class fixes share: a deny rule should be matched
+ * against *the text the shell will run*, and everything else in the command line is data the
+ * command is carrying. Replaced with spaces rather than deleted so that offsets, line structure
+ * and `statements()` splitting are all unchanged — the incident card still shows the original
+ * command, so nothing is hidden from the reader; only the matcher stops reading data as code.
+ *
+ * Returns the input unchanged whenever the lexer did not understand it.
+ */
+export function executableText(cmd: string): string {
+  const l = lex(cmd);
+  if (!l.ok) return cmd;
+
+  const blanks: { start: number; end: number }[] = [];
+
+  // --- 1. here-document bodies that nothing will execute -----------------------------------
+  for (const h of l.heredocs) {
+    const consumer = shellConsumerOf(l, h);
+    if (consumer === 'shell') continue;                       // executed as shell: scan it all
+    if (consumer === 'foreign') {
+      const body = cmd.slice(h.bodyStart, h.bodyEnd);
+      const verb = foreignVerbOf(l, h);
+      // An UNQUOTED delimiter means the shell expands the body before the interpreter sees it
+      // (POSIX §2.7.4), so a `$(...)` in there really does run. Fail closed on that case.
+      if (!h.delimiterQuoted && /\$\(|`/.test(body)) continue;
+      if (!verb || !bodyIsForeignSource(verb, body)) continue;
+    }
+    blanks.push({ start: h.bodyStart, end: h.bodyEnd });
   }
 
-  return out.join('\n');
+  // --- 2. quoted arguments to commands that cannot execute them -----------------------------
+  // --- 3. `-e` / `-c` programs in a foreign language ----------------------------------------
+  const words = l.words;
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]!;
+    if (!w.commandPosition) continue;
+    const verb = verbOf(w);
+
+    // The rest of this statement, up to the next command position.
+    let end = words.length;
+    for (let j = i + 1; j < words.length; j++) if (words[j]!.commandPosition) { end = j; break; }
+    const args = words.slice(i + 1, end);
+
+    if (isInertVerb(verb, args)) {
+      for (const a of args) {
+        // `hasExpansion` is the interlock: `grep "$(rm -rf /)" f` has an inert verb and a quoted
+        // argument, and that argument runs a command before grep is invoked.
+        if (a.hasExpansion) continue;
+        if (a.quoting === 'single' || a.quoting === 'double') {
+          blanks.push({ start: a.start, end: a.end });
+        }
+      }
+      continue;
+    }
+
+    const lang = languageOf(verb);
+    if (lang) {
+      for (let k = 0; k < args.length; k++) {
+        if (!EVAL_FLAGS.has(unquote(args[k]!.raw))) continue;
+        const prog = args[k + 1];
+        if (!prog) continue;
+        if (prog.quoting !== 'single' && prog.quoting !== 'double') continue;
+        if (prog.hasExpansion) continue;   // same interlock as above
+        if (!bodyIsForeignSource(verb, prog.raw)) continue;
+        blanks.push({ start: prog.start, end: prog.end });
+      }
+    }
+  }
+
+  if (blanks.length === 0) return cmd;
+  const out = [...cmd];
+  for (const b of blanks) {
+    for (let i = b.start; i < b.end && i < out.length; i++) {
+      if (out[i] !== '\n') out[i] = ' ';
+    }
+  }
+  return out.join('');
+}
+
+function isInertVerb(verb: string, args: readonly Word[]): boolean {
+  if (INERT_VERBS.has(verb)) return true;
+  if (verb === 'git') {
+    const sub = args.find((a) => !unquote(a.raw).startsWith('-'));
+    return sub !== undefined && GIT_MESSAGE_SUBCOMMANDS.has(unquote(sub.raw));
+  }
+  return false;
+}
+
+/**
+ * What will consume a here-document body: a shell, a foreign interpreter, or neither.
+ *
+ * "Neither" means the body is inert data — a file being written, a commit message, a PR body.
+ * The consumer is looked for among the COMMAND-POSITION words on the opener's line, which is what
+ * makes `cat <<EOF | bash` still fail closed: `bash` is at a command position after the pipe.
+ */
+function shellConsumerOf(l: Lex, h: HeredocSpan): 'shell' | 'foreign' | 'data' {
+  let sawForeign = false;
+  for (const w of l.words) {
+    if (w.end > h.bodyStart) break;
+    if (!w.commandPosition) continue;
+    // Only the statement chain that opened this heredoc matters; words before an earlier
+    // heredoc's body belong to an earlier line and are skipped by the offset test above.
+    const verb = verbOf(w);
+    if (SHELL_VERBS.has(verb)) {
+      // A shell ANYWHERE on the opener chain wins, because `cat <<EOF | bash` executes the body.
+      if (w.start >= lineStartOf(l, h)) return 'shell';
+    }
+    if (FOREIGN_INTERPRETERS.has(verb) && w.start >= lineStartOf(l, h)) sawForeign = true;
+  }
+  return sawForeign ? 'foreign' : 'data';
+}
+
+function foreignVerbOf(l: Lex, h: HeredocSpan): string | null {
+  for (const w of l.words) {
+    if (w.end > h.bodyStart) break;
+    if (!w.commandPosition || w.start < lineStartOf(l, h)) continue;
+    const verb = verbOf(w);
+    if (FOREIGN_INTERPRETERS.has(verb)) return verb;
+  }
+  return null;
+}
+
+/** Offset at which the heredoc's opener line begins. */
+function lineStartOf(_l: Lex, h: HeredocSpan): number {
+  return h.bodyStart - h.openerLine.length - 1;
+}
+
+/**
+ * Kept as the public name the rest of the engine and the tests call. It now delegates to
+ * `executableText`, which does strictly more: heredoc bodies AND quoted inert arguments AND
+ * foreign `-e` programs.
+ */
+export function stripDataHeredocs(cmd: string): string {
+  if (!cmd.includes('<<') && !/['"]/.test(cmd)) return cmd;
+  return executableText(cmd);
 }

@@ -6,6 +6,7 @@ import { backupsDir, ensureHome, usewardenHome } from '../paths.js';
 import { mkdirpSafe, sha256 } from '../util.js';
 import { detectAgents, detectAllScopes, type Detection, type Scope } from './detect.js';
 import { openCodePlugin, planFor, USEWARDEN_TAG } from './entries.js';
+import { AGENT_IDS, EVENT_KINDS } from '../types.js';
 import { isDirty, previewDiff, readJsonFile, serialize, type JsonFile } from './jsonfile.js';
 import type { Store } from '../store.js';
 
@@ -208,10 +209,74 @@ export function removeEntries(f: JsonFile, agent: AgentId, dropEmptyContainer = 
   }
 }
 
+/**
+ * The script path and argv tail a registered hook actually invokes, if it invokes anything.
+ *
+ * Both registration shapes are parsed, because usewarden writes both (see `commandFields`):
+ *   - exec form  (Claude Code):  { command: '<node>', args: ['<script>', 'hook', agent, kind] }
+ *   - string form (everyone else): "'<node>' '<script>' hook <agent> <kind>"
+ */
+function invokedScriptAndTail(o: Record<string, unknown>): { script: string; tail: string[] } | null {
+  const args = Array.isArray(o['args']) ? (o['args'] as unknown[]) : null;
+  if (args && typeof args[0] === 'string') {
+    return { script: args[0], tail: args.slice(1).filter((a): a is string => typeof a === 'string') };
+  }
+  if (typeof o['command'] === 'string') {
+    const m = /^'([^']*)'\s+'([^']*)'\s*(.*)$/.exec(o['command']);
+    if (m?.[2] !== undefined) {
+      return { script: m[2], tail: (m[3] ?? '').trim().split(/\s+/).filter(Boolean) };
+    }
+  }
+  return null;
+}
+
+/**
+ * IS THIS ENTRY USEWARDEN'S OWN, JUDGED BY WHAT IT RUNS RATHER THAN BY A LABEL ON IT?
+ *
+ * `_usewarden: true` is not part of Claude Code's documented hook schema, and Claude Code
+ * rewrites `~/.claude/settings.json` when its own settings change. On this machine it did exactly
+ * that on 2026-08-24 and dropped the tag from all fourteen places while preserving `matcher`,
+ * `type`, `command`, `args` and `timeout` byte for byte. Usewarden was still registered, still
+ * firing, and still recording - and could no longer see itself (D-243).
+ *
+ * The consequences all followed from that one missing key: `status` reported UNPROTECTED using
+ * the TAMPERED wording ("entries are GONE"), `init` - which is what that message tells the user
+ * to run - added a SECOND copy of every hook instead of being idempotent, and `uninstall` said
+ * "nothing to remove" while seven live registrations stayed in the file.
+ *
+ * So identity moves to the thing an outside writer cannot rewrite without breaking the hook
+ * itself: the argv. `hook <agent> <kind>` is usewarden's own private CLI contract - nothing else
+ * invokes a `cli.js` with that exact triple - and if a rewriter dropped THAT, the hook would stop
+ * working and every other check would notice. This is the same doctrine as the rest of the
+ * project: `.githooks/pre-push` matches the resolved remote URL rather than the remote's name,
+ * and `resolve-browser.sh` resolves a realpath rather than trusting a symlink. A name is not a
+ * safe selector; what a thing actually does is.
+ *
+ * The tag is still honoured, and still written, because it remains the cheapest signal when it
+ * survives - and because `commandPointsAtUsewarden` needs the tamper case (tag kept, payload
+ * swapped) to keep reaching it.
+ */
+function invocationIsUsewardens(o: Record<string, unknown>): boolean {
+  const inv = invokedScriptAndTail(o);
+  if (!inv) return false;
+  // The argv tail must be usewarden's own contract, exactly.
+  if (inv.tail.length < 3) return false;
+  const [verb, agent, kind] = inv.tail;
+  if (verb !== 'hook') return false;
+  if (!agent || !(AGENT_IDS as readonly string[]).includes(agent)) return false;
+  if (!kind || !(EVENT_KINDS as readonly string[]).includes(kind)) return false;
+  // ...and the script must plausibly be a usewarden CLI. Same basename as our own covers the
+  // npm layouts and a source checkout alike; an exact path match covers the ordinary case.
+  const own = usewardenScriptPath();
+  if (path.resolve(inv.script) === path.resolve(own)) return true;
+  return path.basename(inv.script) === path.basename(own);
+}
+
 export function isUsewardenEntry(x: unknown): boolean {
   if (typeof x !== 'object' || x === null) return false;
   const o = x as Record<string, unknown>;
   if (o[USEWARDEN_TAG] === true) return true;
+  if (invocationIsUsewardens(o)) return true;
   const hooks = o['hooks'];
   if (Array.isArray(hooks)) return hooks.some((h) => isUsewardenEntry(h));
   return false;
@@ -219,6 +284,28 @@ export function isUsewardenEntry(x: unknown): boolean {
 
 /** The usewarden-owned subtree of a config, canonicalized for hashing. */
 export function extractUsewardenEntries(configPath: string, agent: AgentId): unknown {
+  return extractEntries(configPath, agent, false);
+}
+
+/**
+ * The PRE-D-243 canonicalisation, which kept `_usewarden` in the hash.
+ *
+ * Kept for exactly one purpose: an install that was baselined by an older usewarden has a stored
+ * hash computed this way, and comparing it against the new tag-free hash would differ for every
+ * agent on every machine. That would greet everyone who upgrades with TAMPERED — the strongest
+ * word this tool has — for a change in how usewarden hashes its own bookkeeping. Shipping an
+ * upgrade that cries wolf on first run is the alarm-fatigue failure D-142 exists to avoid, and it
+ * would be self-inflicted.
+ *
+ * So status compares against both, and silently re-baselines to the new form on a legacy match.
+ * This is a MIGRATION, not a second identity: it can only ever turn a false alarm into a pass,
+ * never a real tamper into a pass, because a tampered payload matches neither hash.
+ */
+export function extractUsewardenEntriesLegacy(configPath: string, agent: AgentId): unknown {
+  return extractEntries(configPath, agent, true);
+}
+
+function extractEntries(configPath: string, agent: AgentId, keepTag: boolean): unknown {
   if (!fs.existsSync(configPath)) return null;
   if (agent === 'opencode') return sha256(fs.readFileSync(configPath));
   let f: JsonFile;
@@ -234,10 +321,37 @@ export function extractUsewardenEntries(configPath: string, agent: AgentId): unk
   for (const evName of Object.keys(plan.entries)) {
     const existing = node?.[evName];
     if (!Array.isArray(existing)) continue;
-    const mine = existing.filter((x) => isUsewardenEntry(x));
+    const mine = existing.filter((x) => isUsewardenEntry(x)).map((x) => keepTag ? x : withoutTag(x));
     if (mine.length) out[evName] = mine;
   }
   return Object.keys(out).length ? out : null;
+}
+
+/**
+ * Drop `_usewarden` everywhere before hashing, so integrity tracks the PAYLOAD and not the label.
+ *
+ * The tag is usewarden's own bookkeeping and is not part of any agent's documented hook schema,
+ * so an agent that rewrites its settings file may legitimately discard it - Claude Code did, on
+ * 2026-08-24, keeping `command`, `args`, `matcher` and `timeout` exactly and dropping the tag from
+ * all fourteen places (D-243). Hashing the tag made that indistinguishable from someone editing
+ * the hook, and reported the strongest word the tool has, TAMPERED, for a change that altered
+ * nothing about what executes.
+ *
+ * `status.ts` says it in its own comment: "false alarms are how a security tool teaches people to
+ * ignore it." A TAMPERED that fires when nothing was tampered with is worse than useless, because
+ * the next one is the real one and it looks identical. What integrity must still catch - a kept
+ * tag with a swapped command - is untouched by this, because the command is exactly what is left
+ * in the hash.
+ */
+function withoutTag(x: unknown): unknown {
+  if (Array.isArray(x)) return x.map((v) => withoutTag(v));
+  if (typeof x !== 'object' || x === null) return x;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(x as Record<string, unknown>)) {
+    if (k === USEWARDEN_TAG) continue;
+    out[k] = withoutTag(v);
+  }
+  return out;
 }
 
 export function integrityHash(entries: unknown): string {

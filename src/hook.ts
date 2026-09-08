@@ -1,4 +1,5 @@
 import './boot.js';
+import { EVENT_KINDS } from './types.js';
 import type { AgentId, EventKind, NormalizedEvent } from './types.js';
 import { AGENT_IDS } from './types.js';
 import { Store } from './store.js';
@@ -82,7 +83,7 @@ export async function runHook(argv: string[]): Promise<number> {
 }
 
 function isEventKind(s: string): s is EventKind {
-  return ['session_start', 'session_end', 'user_prompt', 'pre_tool', 'post_tool', 'pre_compact', 'config_change'].includes(s);
+  return (EVENT_KINDS as readonly string[]).includes(s);
 }
 
 function timeout(ms: number): Promise<'timeout'> {

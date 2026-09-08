@@ -42,9 +42,153 @@ says `PENDING`, the control is unproven and must be treated as absent.
 | T-14 | Credential handling | Usewarden reads or logs `.env`, API keys, or `ANTHROPIC_BASE_URL` redirection (S1, CVE-2026-21852) | Usewarden never reads file *contents* for policy decisions — only paths, tool names, and commands. `.env*` access is a **deny** default in policy. Judge payloads are redacted: any `sk-`/`ghp_`/`AKIA` shaped token and any `.env` content is stripped before the prompt. API keys are read from env at call time and never persisted, logged, or echoed. | `tests/judge.test.ts` → *T-14*: a real-shaped `sk-ant-` token is asserted present in the transcript, then absent from every incident row. `tests/core.test.ts` covers the redactor's patterns. `tests/sabotage/suite.test.ts` SAB-01 asserts a blocked `.env` incident does not itself contain the secret. |
 | T-15 | Telemetry | Analytics SDK hangs the CLI on a firewalled machine; or exfiltrates paths/prompts | Off by default, explicit `usewarden telemetry on`, honours `USEWARDEN_TELEMETRY=0` and `DO_NOT_TRACK=1`. 2-second hard timeout, zero retries, fire-and-forget, unref'd — never blocks process exit. Payload is counts and coarse categories only; schema pinned in `docs/TELEMETRY.md`. v1 ships the local recorder only, no endpoint. | `tests/packaging.test.ts` → *T-15: telemetry* — 8 tests: off by default, `DO_NOT_TRACK=1` and `USEWARDEN_TELEMETRY=0` each override an explicit opt-in, https-only endpoint, a payload built from a database containing a real path leaks none of it, unsafe rule labels are dropped, recording stays inside `USEWARDEN_HOME`, and `docs/TELEMETRY.md` documents every field the code emits. **Consent** adds 5 more: the setting alone does not enable telemetry, a receipt names its schema version and fields, a schema bump lapses every existing receipt, a receipt edited to cover more than it names is rejected, and `off --purge` really deletes the recorded payloads. `tests/sabotage/suite.test.ts` SAB-23 forces the flag on in the database and asserts nothing is sent or recorded. |
 | T-16 | Backup / restore | Usewarden mangles a user config and cannot put it back | Timestamped backup written to `backups/` **before** any config write; `usewarden restore-configs` proven to restore **byte-identical**; non-interactive mode writes the diff next to the backup. | `tests/installer.test.ts` → G1/G2/G5/G7 (backup before write, diff archived, byte-identical restore, absent-file creation and deletion), **plus two regression tests** for the empty-container bug the clean-machine simulation found. End to end with sha256 in `verification/phase7-clean-machine.txt`. |
-
 | T-17 | Reported metrics | Usewarden overstates what it caught. A `usewarden demo` run, a duplicate hook delivery, a retried action, or a hand-edited counter inflates the figure a user screenshots — the guardian lying about its own evidence | Every figure is **derived by query** per **origin** (`live` / `demo` / `fixture`) rather than read from a monotonic counter; only `live` reaches a headline. Incidents carry a dedupe hash on the same 2s bucket as events, so one logical action delivered twice is one attempt. Attempts and *distinct* actions are reported separately. The arithmetic is re-checked on every read and a violation is loud: red on `status`, non-zero exit on `metrics`. Full method: `docs/METRICS.md`. | `tests/sabotage/suite.test.ts` → **SAB-17..SAB-21, SAB-24**: three real `usewarden demo` subprocess runs record 12 blocks and move the headline by 0; a replay (including cross-agent) counts once; 5 retries are 5 attempts and 1 distinct action; a counter forged to 999,999 changes nothing displayed; a doctored incident table makes the integrity check FIRE with a non-zero exit; savings cannot be inflated by demo runs, retries, or unpriced categories. Live: `verification/metrics-live-proof.txt`, and the defect itself at `verification/metrics-inflation-before.txt`. |
 | T-18 | Estimated savings | An invented "we saved you $X" number becomes the product's most-quoted claim and is not defensible | The estimate is a **range**, never a point, computed from **distinct live** actions only; every constant is printed by `usewarden metrics --json`; `measured: false` is stamped on it; and credential-exposure and shell-execution catches are **counted and never priced**, because a dollar figure for "your key did not leak" is invented precision. The reference price carries the date it was last checked against the vendor's page. | `tests/sabotage/suite.test.ts` → **SAB-24**: zero live catches estimate zero however many demo catches exist; retries do not multiply it; credential/shell catches are counted with `usd` still zero; and the estimate can never exceed the ceiling its own constants imply. `tests/site.test.ts` asserts the landing page never states a savings figure without the word *range*. |
+| T-19 | Usewarden's own reporting | A hook is registered, unmodified, points at usewarden's binary — and has never executed once. Every config check passes and the guardian is not running. This is the CVE-free, attacker-free version of the same failure: `tsc` emits without an execute bit, an agent spawns the hook, the OS refuses, the agent carries on, and `status` reads the config back and says PROTECTED. | Registration and execution are reported as **separate facts**. `status` prints a LAST FIRED column beside STATE; `doctor` carries one row per agent that is evidence of execution rather than of bookkeeping, and its verdict is three-valued — fired / too soon to say / **UNVERIFIED**. Usewarden cannot distinguish "you have not opened that agent" from "its hooks do not execute", so it says both rather than picking the flattering one. `doctor --strict` exits non-zero on UNVERIFIED for CI. | `tests/firing-evidence.test.ts` — 8 tests: per-agent counts and last-seen (a global count is what hides the dead agent), the grace window, and that the UNVERIFIED message names both readings and the action that settles it. Sabotage: `verification/run-2026-09-08/21-sabotage-firing-check.txt` deletes every event for an agent that really was firing and the row flips PASS → UNVERIFIED. Live: `verification/run-2026-09-08/20-firing-check-live.txt`, where this repository's own state showed Codex CLI registered for ten days, four green config rows, and zero events ever. |
+
+## HOOK ATTESTATION — what happens when a hook is removed, repointed, or simply never runs
+
+*Written 2026-09-08, in answer to a question asked on [Discussion #17](https://github.com/djayamah/usewarden/discussions/17): are hook attestation checks done via health checks, or by sitting in the execution pipeline? The short answer is **neither** — and the reasons are worth more than the answer.*
+
+Usewarden **is** in the execution pipeline: it is a `PreToolUse`-class hook, invoked by the agent
+before a tool runs, and it returns a deny decision that the agent honours. It is not an observer
+alongside the pipeline. But being in the pipeline is not the same as knowing you are in it, and
+this section is about the second thing.
+
+### The four questions, kept separate on purpose
+
+Collapsing these is the entire failure mode. Each is answered by a different mechanism, each can
+be true while another is false, and usewarden reports them separately because it has been burned
+by every merge of them it ever attempted.
+
+| # | Question | How usewarden answers it | Surfaced as |
+|---|---|---|---|
+| 1 | **Are the entries there?** | Reads the agent's config file and extracts the entries it recognises as its own. | `registered` / `UNPROTECTED` |
+| 2 | **Are they still what we wrote?** | SHA of the extracted entries against a hash recorded at `init`. | `hashMatches` / `TAMPERED` |
+| 3 | **Do they still point at usewarden?** | Every entry's command must be the resolved node binary with usewarden's own script and the fixed argv `hook <agent> <kind>`. | `commandPointsAtUsewarden` / `TAMPERED` |
+| 4 | **Has one ever actually run?** | Counts events in usewarden's own database, per agent, with the timestamp of the last one. | `LAST FIRED` / `UNVERIFIED` |
+
+**Questions 1–3 read a file. Only question 4 is evidence.** Until 2026-09-08 usewarden answered
+the first three and did not ask the fourth, which is why T-19 above is a threat row and not a
+footnote.
+
+### Removal
+
+Detected, and raised in the loudest state the tool has, naming the file it was removed from. The
+escape hatch (T-08) never mutes it: a maintainer editing their own agent config has `TAMPERED`
+suppressed, and that suppression deliberately does not extend to removal, because "you changed
+this yourself" is a plausible account of an edit and never a plausible account of protection being
+gone. (What an operator sees on the terminal, and what to do about it, belongs in the README. This
+section is about the detection guarantee behind it.)
+
+Proven by an A/B against a real agent, not by a unit test: `verification/live/08-ab-removal.txt` —
+hooks present, the read is blocked; hooks removed, the read goes through and the reported state
+flips; hooks restored, blocked again.
+
+### Repointing
+
+Detected, and this is where recognition matters.
+
+**Usewarden recognises its own hook by what the hook runs, not by a label on it.** An entry counts
+as usewarden's when the command is the absolute node binary and the argv is
+`<abs path>/cli.js hook <agent> <kind>` — usewarden's own private CLI contract. An attacker who
+repoints the command to their payload fails check 3 and the state goes `TAMPERED`.
+
+It did not always work that way, and the day it changed is the most instructive thing in this
+document.
+
+### The 2026-08-24 incident — one cosmetic key, four failures
+
+Usewarden used to identify its entries by a bookkeeping key, `_usewarden: true`, that it wrote
+into the agent's config. That key is **not part of Claude Code's documented hook schema**. On
+2026-08-24 at 09:38 Claude Code rewrote `~/.claude/settings.json` — normal, legitimate behaviour
+for a program managing its own config file — and dropped the key from all fourteen places, while
+preserving `matcher`, `type`, `command`, `args` and `timeout` byte for byte. Nothing was attacked.
+Nothing malicious happened. One cosmetic key went missing.
+
+Usewarden then could not see itself, and four things broke at once:
+
+1. **`status` said UNPROTECTED** while usewarden was, at that moment, holding 4,776 events, 45
+   blocked actions and 3 drift warnings across 11 real sessions going back to 2026-08-20 —
+   including the session that was reading the file. Protection was running. The report was false.
+2. **`init` — which is exactly what that message tells the user to run — doubled every hook.**
+   Seven invocations became fourteen. Every agent event would have fired usewarden twice, and
+   three times after the next rewrite, without bound. Idempotence was silently gone.
+3. **`uninstall` reported success while removing nothing**: *"No usewarden hook entries found;
+   nothing to remove"*, with seven live registrations still in the file.
+4. **It was an evasion path**, which is worse than the other three together. Proven by reverting
+   the fix and re-running the sabotage: a payload swapped **and** the label dropped was not
+   detected at all. Only "payload swapped, label kept" was. An attacker who repointed the hook and
+   deleted the cosmetic key became invisible — and the user's rational response to "entries are
+   GONE" is to run `init`, which would have installed usewarden *alongside* the malicious hook and
+   left it running.
+
+**The fix was to move identity onto the argv**, and the second half was to make the integrity hash
+ignore the label, so that a dropped label is no longer indistinguishable from a swapped command —
+otherwise the fix would have converted a false UNPROTECTED into a false TAMPERED, which is just as
+corrosive. Full record: DECISIONS D-243; six regression tests in `tests/config-rewrite.test.ts`,
+each asserting the label really went and the hooks really stayed before asserting any verdict.
+
+The general lesson is larger than the bug: **usewarden writes metadata into files owned by other
+programs, and those programs are entitled to rewrite them. Any identity that depends on a foreign
+file preserving a key it does not know about is a temporary identity.** A name is not a safe
+selector; what a thing actually does is.
+
+### Never ran at all
+
+Detected as of 2026-09-08 (T-19), and reported as **UNVERIFIED** rather than as either a pass or a
+failure.
+
+`status` shows LAST FIRED beside STATE, so `PROTECTED / never` — the exact shape of the bug — is
+visible on the row rather than inferable from its absence. `doctor` adds one row per agent whose
+detail names the event count and the age of the last one. A registered agent that has been silent
+past a 24-hour grace window is UNVERIFIED, and the message states both readings, because usewarden
+genuinely cannot tell them apart from where it stands:
+
+> NO EVENTS EVER, registered 10d ago. Either you have not used this agent since then, or its hooks
+> are registered and not executing. Usewarden cannot tell those apart from here: run any command
+> in that agent and re-run `usewarden doctor`.
+
+Claiming the benign reading would be the silent-guardian failure this whole document is about.
+Claiming the dangerous one would be a false alarm, and false alarms are how a security tool
+teaches people to ignore it.
+
+### WHAT USEWARDEN CANNOT DETECT — stated here, in the same place, on purpose
+
+A list of controls without its own limits is marketing. Every item below is a real gap, not a
+hypothetical one.
+
+| Gap | Why it exists | What would actually cover it |
+|---|---|---|
+| **Silence is ambiguous.** "Registered and never fired" cannot be distinguished from "you have not opened that agent." | Usewarden sees its own invocations. It has no way to know the agent ran at all if the hook did not fire. | Reading the agent's own logs or session store, per vendor, with no stable contract for any of them. Not attempted; it would be six brittle integrations to remove one honest "I don't know". |
+| **An agent surface that fires no hooks is invisible, and usewarden cannot even tell you it is there.** Codex IDE and desktop wrappers, OpenCode SDK-driven sessions. | No hook system, nothing to register into. | Nothing usewarden can do. Named in README "What usewarden cannot catch" and in the HOOK-MATRIX rows. |
+| **`--dangerously-skip-permissions` and equivalents.** | The agent stops consulting hooks. | Nothing. A guardrail invoked by the guarded party is bounded by the guarded party's cooperation — see below. |
+| **A rewriter that normalises `command` or `args`.** | argv-based identity defeats a rewriter that drops an unknown key; it would not survive one that rewrote the argv itself. | A sidecar record of registrations in `~/.usewarden/`, diffed against the config. Strictly more work and not needed yet — D-243's own "what would change it". |
+| **Anything between the hook returning and the tool running.** | Usewarden returns a decision; the agent enforces it. A bug or a deliberate change in the agent's enforcement is outside usewarden's reach. | An OS-level sandbox. That is a different product, and the README says so. |
+| **Gemini's fail-open on malformed stdout (T-11), from the other side.** | If some future adapter bug puts a stray byte on stdout, Gemini defaults to Allow. Usewarden guards its own stdout, but cannot observe the vendor's parse result. | The event count in question 4 is the nearest available signal, and it is not the same thing: a hook whose output fails to parse still fired, so the count rises while nothing is enforced. Stated here rather than glossed. |
+
+### Why a proxy is not a substitute for this — and the part of the objection that lands
+
+The Discussion #17 comment proposed moving policy checks out of client-side hooks and into an
+inline proxy, on the grounds that it "solves silent hook failure completely". The full analysis is
+DECISIONS D-266; the two-line version belongs here because it is a threat-model claim.
+
+**What it gets right:** silent hook failure is real, it is this project's own founding defect, and
+an interposer that traffic *must* traverse is a structurally stronger position than a callback the
+guarded party chooses to invoke. That is a genuine architectural point and it is not answered by
+disliking proxies.
+
+**Why it does not substitute:** usewarden's threat model is the **OS boundary** — a file written,
+a command executed, a `.env` read — and none of those cross a model API. A proxy sees the model's
+*proposal* and never the *resolved* action: not the absolute path after symlink and glob
+resolution, not the cwd it lands in, not whether the harness expanded, retried or truncated it.
+CLAUDE.md's own rule that "a symlink is not a fence" is a statement about where the decision has
+to be made. And critically, **a proxy has the same attestation problem one config key over**: it
+is reached through a base-URL setting in exactly the same class of agent-owned file as the hook
+registration, with the same removal and repointing failure modes — and a repointed base URL is
+CVE-2026-21852 in the table above, which exfiltrates the API key rather than merely going quiet.
+
+The two guard different boundaries and the honest answer is both, not either.
 
 ## Explicit non-goals
 

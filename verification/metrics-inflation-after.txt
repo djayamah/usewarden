@@ -1,0 +1,52 @@
+=== metrics inflation, measured AFTER the fix ===
+date: 2026-08-20T04:27:23Z
+HEAD: fe60069
+USEWARDEN_HOME: (temp sandbox, empty)
+
+--- the SAME three 'usewarden demo' runs as verification/metrics-inflation-before.txt ---
+  run: caught 4/4
+  run: caught 4/4
+  run: caught 4/4
+
+--- usewarden metrics ---
+
+  usewarden metrics
+
+  ORIGIN         BLOCKED  DISTINCT  DRIFT  EVENTS  SESSIONS
+  real sessions  0        0         0      0       0
+  demo           12       8         0      12      3
+  fixture/tests  0        0         0      0       0
+
+  Only the "real sessions" row is ever shown as a headline figure. A demo run and a
+  test fixture are recorded, labelled, and kept out of it. Every figure is derived by
+  query, not read from a counter, so it can be recomputed and audited.
+
+┌───────────────────────────────────────────────────────────────────────────────┐
+│ Estimated savings  (distinct-live-blocked-actions/v1)                         │
+├───────────────────────────────────────────────────────────────────────────────┤
+  metrics exit code: 0
+
+--- usewarden status: the box a user reads ---
+│ What usewarden has done                                                          │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│ actions blocked      0  (0 distinct)                                             │
+│ drift warnings       0                                                           │
+│ events inspected     0                                                           │
+│ sessions protected   0                                                           │
+│ every figure above counts REAL agent sessions only                               │
+│ demo runs            12 blocked in 3 demo session(s), counted separately         │
+│                                                                                  │
+│ est. tokens saved    nothing to estimate yet                                     │
+│ est. money saved     $0.00 (est.)                                                │
+│ guardian overhead    $0.0000 metered, 0 unpriced local calls                     │
+│ savings are an ESTIMATE from assumed bands - method: usewarden metrics, docs/MET │
+│         RICS.md                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────┘
+
+
+--- usewarden statusline ---
+  'usewarden UNPROTECTED'
+
+BEFORE: actions_blocked 12, events_seen 8, from zero real sessions.
+AFTER:  the headline is 0 and stays 0. The demo's catches are recorded, labelled
+        'demo', reported on their own row, and consistent with their own event count.

@@ -1,0 +1,19 @@
+=== the LIVE site, after deploy ===
+2026-09-08T04:13:52Z
+  bytes:    17590
+--- is the answer actually on the page? ---
+  found: Free. Local. No account.
+  found: It is free.
+  found: It needs no API key.
+  found: Your code stays on your machine.
+--- links still resolve ---
+  200 https://djayamah.github.io/usewarden/
+  200 https://djayamah.github.io/usewarden/writeups/
+  200 https://djayamah.github.io/usewarden/writeups/01-hook-not-running.html
+--- and the public README's first screen ---
+  
+  > ### Free. Local. No account.
+  >
+  > Two people opened issues asking this before anything else, so it belongs here rather than in a
+  > FAQ ([#9](https://github.com/djayamah/usewarden/issues/9),
+  > [#14](https://github.com/djayamah/usewarden/issues/14)).

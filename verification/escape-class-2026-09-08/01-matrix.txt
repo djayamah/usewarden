@@ -1,0 +1,146 @@
+THE QUOTED-PROGRAM ESCAPE CLASS — TESTED AGAINST THE BYTES ON THE REGISTRY
+Captured 2026-09-08T09:56:42Z
+
+=== PROVENANCE: this is the published tarball, not a local build ===
+  https://registry.npmjs.org/usewarden/-/usewarden-0.1.1.tgz
+  sha1 computed  41fab5e25a4f1f445de04fc49b4e4c481d589581
+  sha1 registry  41fab5e25a4f1f445de04fc49b4e4c481d589581
+  sha512 computed  sha512-AANGlqofIeZ0r+vywFpPYdAiIJWOZFLEA4G9gAoHG6OV1O8ZaleU6NUEVNTWPJQ9goFntFJAv58DxlAhyse4XQ==
+  sha512 registry  sha512-AANGlqofIeZ0r+vywFpPYdAiIJWOZFLEA4G9gAoHG6OV1O8ZaleU6NUEVNTWPJQ9goFntFJAv58DxlAhyse4XQ==
+  Both match. The shipped tree has no dist/src/engine/shlex.js, which confirms it predates
+  D-279 and D-280 and is therefore the pre-fix engine every current user has.
+
+=== THE THREE ENGINES UNDER TEST ===
+  0.1.1     the published tarball, unpacked, run as-is
+  HEAD      commit 0dee6a7, built pristine from 'git archive' into .work/escape-2026-09-08/head-orig
+  FIXED     the working tree with this run's fix
+
+=== THE TEST BED ===
+  A git repository at .work/escape-2026-09-08/proj, listed as the sole allowed_path.
+  Deliberately NOT under a temp root and with no path segment named 'scratchpad': either
+  would trip the ephemeral exemption (D-282) and make every row below meaningless.
+  Each row is a real PreToolUse hook invocation of that engine's own dist/src/cli.js.
+
+=== 1. THE MATRIX ===
+FORM                       0.1.1   HEAD    FIXED   COMMAND
+----------------------------------------------------------------------------------------------------------------------
+sh -c                      ALLOW   DENY    DENY    sh -c 'rm -rf /'
+bash -c                    ALLOW   DENY    DENY    bash -c 'rm -rf /etc'
+bash -lc                   ALLOW   DENY    DENY    bash -lc 'rm -rf /etc'
+zsh -c                     ALLOW   DENY    DENY    zsh -c 'rm -rf /etc'
+dash -c                    ALLOW   DENY    DENY    dash -c 'rm -rf /etc'
+ksh -c                     ALLOW   DENY    DENY    ksh -c 'rm -rf /etc'
+/bin/sh -c                 ALLOW   DENY    DENY    /bin/sh -c 'rm -rf /etc'
+/usr/bin/env sh -c         ALLOW   ALLOW   DENY    env sh -c 'rm -rf /etc'
+env -i bash -c             ALLOW   ALLOW   DENY    env -i bash -c 'rm -rf /etc'
+env VAR=1 sh -c            ALLOW   ALLOW   DENY    env VAR=1 sh -c 'rm -rf /etc'
+nice sh -c                 ALLOW   ALLOW   DENY    nice sh -c 'rm -rf /etc'
+nice -n 10 bash -c         ALLOW   ALLOW   DENY    nice -n 10 bash -c 'rm -rf /etc'
+ionice sh -c               ALLOW   ALLOW   DENY    ionice sh -c 'rm -rf /etc'
+timeout sh -c              ALLOW   ALLOW   DENY    timeout 5 sh -c 'rm -rf /etc'
+timeout --preserve-status  ALLOW   ALLOW   DENY    timeout --preserve-status 5 bash -c 'rm -rf /etc'
+nohup sh -c                ALLOW   ALLOW   DENY    nohup sh -c 'rm -rf /etc'
+setsid sh -c               ALLOW   ALLOW   DENY    setsid sh -c 'rm -rf /etc'
+stdbuf sh -c               ALLOW   ALLOW   DENY    stdbuf -o0 sh -c 'rm -rf /etc'
+command sh -c              ALLOW   ALLOW   DENY    command sh -c 'rm -rf /etc'
+exec sh -c                 ALLOW   ALLOW   DENY    exec sh -c 'rm -rf /etc'
+time sh -c                 ALLOW   ALLOW   DENY    time sh -c 'rm -rf /etc'
+watch sh -c                ALLOW   ALLOW   DENY    watch -n1 sh -c 'rm -rf /etc'
+script -c                  DENY    DENY    DENY    script -q /dev/null sh -c 'rm -rf /etc'
+sudo -u sh -c              DENY    DENY    DENY    sudo -u root sh -c 'rm -rf /etc'
+sudo sh -c                 DENY    DENY    DENY    sudo sh -c 'rm -rf /etc'
+doas sh -c                 ALLOW   ALLOW   DENY    doas sh -c 'rm -rf /etc'
+su -c                      ALLOW   ALLOW   DENY    su -c 'rm -rf /etc'
+chroot sh -c               DENY    DENY    DENY    chroot / sh -c 'rm -rf /etc'
+find -exec sh -c           ALLOW   ALLOW   DENY    find . -type f -exec sh -c 'rm -rf /etc' {} ;
+find -exec direct          DENY    DENY    DENY    find / -name x -exec rm -rf /etc ;
+find -execdir              ALLOW   ALLOW   DENY    find . -execdir sh -c 'rm -rf /etc' {} ;
+xargs sh -c                ALLOW   ALLOW   DENY    echo x | xargs sh -c 'rm -rf /etc'
+xargs -I sh -c             ALLOW   ALLOW   DENY    echo x | xargs -I{} sh -c 'rm -rf /etc'
+parallel sh -c             ALLOW   ALLOW   DENY    parallel sh -c 'rm -rf /etc'
+flock sh -c                DENY    DENY    DENY    flock /tmp/l sh -c 'rm -rf /etc'
+unbuffer sh -c             ALLOW   ALLOW   DENY    unbuffer sh -c 'rm -rf /etc'
+make -c style              DENY    DENY    DENY    make -f /dev/null -c 'rm -rf /etc'
+awk system                 ALLOW   DENY    DENY    awk 'BEGIN{system("rm -rf /etc")}'
+perl -e                    ALLOW   DENY    DENY    perl -e 'system("rm -rf /etc")'
+python -c                  DENY    DENY    DENY    python3 -c 'import os;os.system("rm -rf /etc")'
+node -e                    ALLOW   DENY    DENY    node -e 'require("child_process").execSync("rm -rf /etc")'
+ruby -e                    ALLOW   DENY    DENY    ruby -e 'system("rm -rf /etc")'
+eval                       ALLOW   DENY    DENY    eval 'rm -rf /etc'
+ssh remote                 ALLOW   ALLOW   DENY    ssh host 'rm -rf /etc'
+git alias                  ALLOW   ALLOW   DENY    git -c alias.z='!rm -rf /etc' z
+npm exec                   ALLOW   ALLOW   DENY    npx -c 'rm -rf /etc'
+setarch                    ALLOW   ALLOW   DENY    setarch x86_64 sh -c 'rm -rf /etc'
+strace -E                  ALLOW   ALLOW   DENY    strace -f sh -c 'rm -rf /etc'
+BARE CONTROL rm            DENY    DENY    DENY    rm -rf /etc
+BARE CONTROL force push    DENY    DENY    DENY    git push --force origin main
+flock in-repo lock         ALLOW   ALLOW   DENY    flock ./lock sh -c 'rm -rf /etc'
+script in-repo out         ALLOW   ALLOW   DENY    script -q ./typescript sh -c 'rm -rf /etc'
+chroot in-repo             ALLOW   ALLOW   DENY    chroot ./jail sh -c 'rm -rf /etc'
+make in-repo -f            ALLOW   ALLOW   DENY    make -f ./Makefile -c 'rm -rf /etc'
+find in-repo -exec         DENY    DENY    DENY    find ./src -name x -exec rm -rf /etc ;
+sudo in-repo               DENY    DENY    DENY    sudo ./tool sh -c 'rm -rf /etc'
+python in-repo             DENY    DENY    DENY    python3 ./s.py -c 'import os;os.system("rm -rf /etc")'
+
+=== 2. SCORE — 55 wrapped forms, plus 2 bare controls blocked by all three ===
+  published 0.1.1         44 of 55 wrapped forms ALLOWED
+  committed HEAD          32 of 55 wrapped forms ALLOWED   (D-280 closed 12 of them)
+  after this run's fix     0 of 55 wrapped forms ALLOWED
+
+=== 3. THE FOUR 0.1.1 REFUSED, IT REFUSED BY ACCIDENT ===
+  flock, script, chroot and make blocked only because one of the RUNNER's own arguments
+  (/tmp/l, /dev/null, /) resolved outside the repository. The rows named 'in-repo' above are
+  the same four with an in-repo operand: all four then allow on 0.1.1 AND on HEAD. Coverage
+  that depends on which filename the attacker chose is not coverage.
+
+=== 4. NEGATIVE CONTROLS — ordinary work must still be allowed ===
+FORM                     0.1.1   HEAD    FIXED   COMMAND
+in-repo rm               ALLOW   ALLOW   ALLOW   rm -rf ./build
+in-repo rm nested        ALLOW   ALLOW   ALLOW   rm -rf ./node_modules
+in-repo rm spaced path   ALLOW   ALLOW   DENY    rm -rf "./my build dir"
+npm test                 ALLOW   ALLOW   ALLOW   npm test
+git status               ALLOW   ALLOW   ALLOW   git status
+git commit               ALLOW   ALLOW   ALLOW   git commit -m "fix the thing"
+grep for rm -rf          ALLOW   ALLOW   ALLOW   grep -rn "rm -rf" ./docs
+echo prose               ALLOW   ALLOW   ALLOW   echo "never run rm -rf / on your laptop"
+python heredoc           ALLOW   ALLOW   ALLOW   python3 - <<'PY'
+ls                       ALLOW   ALLOW   ALLOW   ls -la ./src
+make build               ALLOW   ALLOW   ALLOW   make build
+node script              ALLOW   ALLOW   ALLOW   node ./scripts/build.js
+env in repo              ALLOW   ALLOW   ALLOW   env NODE_ENV=test npm test
+timeout npm              ALLOW   ALLOW   ALLOW   timeout 60 npm test
+sh -c in repo            ALLOW   ALLOW   ALLOW   sh -c 'npm test'
+find print               ALLOW   ALLOW   ALLOW   find ./src -name "*.ts" -print
+
+  One row changed: 'rm -rf' of an in-repo directory whose NAME contains a space is now
+  refused. That is the price of the whitespace fence, and the fence is not optional —
+  measured with it removed, twelve runner forms (flock, chroot, setarch, script, ssh, su,
+  xargs -I, find -exec, git -c, npx, make, and one more) escape again. Recorded as test E5.
+
+=== 5. PRECISION COST ON THE FROZEN 92-BLOCK LABEL SET: NONE ===
+
+                        BEFORE (as recorded)    AFTER (rules under test)
+  precision             54.3%  (50/92)          90.9%  (50/55)
+  coverage              100.0%  (50/50)         100.0%  (50/50)
+  false positives       42                      5
+  unknown, still firing 0                       0
+  indeterminate         0                       0
+
+=== 6. NOT AN ARTEFACT OF A HAND-WRITTEN POLICY ===
+Section 1 used a policy written for the test. This section repeats the key rows against the
+policy 0.1.1 GENERATES FOR ITSELF on 'usewarden init' in a fresh repository — the exact file
+every user of 0.1.1 has. Its allowed_paths is a single enumerated absolute path, which is the
+shape the escape exploits.
+
+  allowed_paths:
+    - "/Users/you/dev/warden/.work/escape-2026-09-08/proj"
+  # Never, regardless of allowed_paths.
+
+  ALLOW    sh -c 'rm -rf /'
+  ALLOW    env sh -c 'rm -rf /etc'
+  ALLOW    timeout 5 sh -c 'rm -rf /etc'
+  ALLOW    nohup sh -c 'rm -rf /etc'
+  ALLOW    find . -type f -exec sh -c 'rm -rf /etc' {} ;
+  DENY     rm -rf /etc
+
+  The bare form is refused; every wrapped form is allowed. That is the whole finding.

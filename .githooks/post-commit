@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+#
+# Keep the corpus snapshot fresh, from inside the fence.
+#
+# WHY A GIT HOOK, WHICH IS AN ODD PLACE FOR A BACKUP.
+#
+# The corpus (`~/.usewarden/usewarden.db`) is not in the offsite job's include list, and `~/dev`
+# is — so a snapshot written into this repository is covered by a backup that already runs nightly
+# and has already been restore-tested. See ops/DOGFOOD.md and DECISIONS D-248.
+#
+# The RIGHT trigger is usewarden's own `session_end` hook, and the code for it exists
+# (`backup.dir` in the policy, src/backup.ts `maybeAutoBackup`). Turning it on means writing one
+# key into `~/.usewarden/usewarden.yaml`, which is OUTSIDE this repository, and CLAUDE.md §3
+# permits writes outside it only for hook registrations backed up beforehand. That is the founder's
+# one-line action and it is written out in ops/MANUAL-STEPS.md.
+#
+# Until then this hook is the part that CAN be automated without leaving the fence: commits happen
+# here constantly during a run, and one snapshot copies the whole shared database — including the
+# events from every other project, because there is only one corpus. `--if-older-than 12` makes
+# almost every commit a no-op.
+#
+# It must never fail a commit. post-commit's exit code is ignored by git, and everything here is
+# best-effort anyway, but the redirection and `|| true` say so explicitly.
+set -u
+
+REPO="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "$REPO" ] || exit 0
+
+# A symlink is not a fence (CLAUDE.md §1). Resolve before acting, and do nothing anywhere else.
+REPO="$(cd "$REPO" && pwd -P)"
+case "$REPO" in
+  */dev/warden) : ;;
+  *) exit 0 ;;
+esac
+
+CLI="$REPO/dist/src/cli.js"
+[ -f "$CLI" ] || exit 0      # nothing built yet; a commit is not the moment to build
+
+node "$CLI" backup --to "$REPO/corpus-backup" --if-older-than 12 \
+  >> "$REPO/.usewarden-tmp/corpus-backup.log" 2>&1 || true
+
+exit 0

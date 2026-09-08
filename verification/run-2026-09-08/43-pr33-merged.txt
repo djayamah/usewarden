@@ -1,0 +1,7 @@
+=== merge #33: a one-line SHA patch bump, verified against the upstream v5.0.1 tag, CI green ===
+--- read back ---
+  #33 merged=true at 2026-09-08T00:48:37Z
+--- what is on main now ---
+          uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+--- open PRs now ---
+  none

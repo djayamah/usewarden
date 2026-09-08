@@ -1,0 +1,13 @@
+=== the two new checks, running on a real runner against BOTH repos ===
+  [36;1m  echo "::warning::config reference check: some references were UNVERIFIED - this token could not read their class"[0m
+    repositories these configs run in: djayamah/warden, djayamah/usewarden
+    djayamah/warden: UNVERIFIED — cannot read djayamah/warden itself (gh: Not Found (HTTP 404)) - nothing about its contents can be checked
+    checked against djayamah/usewarden: 15 labels, 2 environments
+  UNVERIFIED: 1 of 2 repositor(y/ies) checked.
+  ##[warning]config reference check: some references were UNVERIFIED - this token could not read their class
+      # Subtest: every state, cross-checked against git status --porcelain --ignored
+      ok 1 - every state, cross-checked against git status --porcelain --ignored
+      # Subtest: every state, cross-checked against git status --porcelain --ignored
+      ok 1 - every state, cross-checked against git status --porcelain --ignored
+    ✔ every state, cross-checked against git status --porcelain --ignored (88.744692ms)
+    ✔ every state, cross-checked against git status --porcelain --ignored (75.868775ms)

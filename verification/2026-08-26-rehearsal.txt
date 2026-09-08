@@ -1,0 +1,95 @@
+=== PUBLICATION REHEARSAL ===
+source:   ed8d80d
+
+--- 1. sanitise (throwaway copy) ---
+=== SANITISE FOR PUBLICATION ===
+  home paths -> /Users/you/                      27 file(s) changed
+  linux home paths -> /home/you/                 1 file(s) changed
+  identity string -> REDACTED                    5 file(s) changed
+  identity string -> REDACTED                    3 file(s) changed
+  identity string -> REDACTED                    0 file(s) changed
+  identity string -> REDACTED                    0 file(s) changed
+  third-party emails -> <email-redacted>         6 file(s) changed
+  harness scratchpad paths -> /tmp/...           0 file(s) changed
+  separator-mangled home paths -> _Users_you_    3 file(s) changed
+  synthetic persona /Users/x -> /Users/someone   0 file(s) changed
+  account name in captured output -> user        3 file(s) changed
+  fake Stripe keys -> non-matching shape         0 file(s) changed
+
+48 file-edit(s) applied. Re-run ./scripts/pre-public-scan.sh to confirm.
+
+--- 2. build the publication tree ---
+=== PUBLICATION TREE BUILT ===
+branch:   publish
+commit:   510a164ff9ef4359324c687e32b3a14cbc02a891
+source:   HEAD (0a69f69)
+excluded: 38 path(s)
+            .claude/current-phase.md
+            .claude/ops-authorized
+            .claude/settings.json
+            BUILD_COMPLETE
+            CLAUDE.md
+            FINAL-REPORT.md
+            PROGRESS.md
+            SPEC-BUILD.md
+            backups/dogfood-20260826T085240Z/.claude_settings.json
+            backups/dogfood-20260826T085240Z/.codex_hooks.json
+            backups/dogfood-20260826T085240Z/.gemini_settings.json
+            backups/pre-install-20260820T095700Z/.claude_settings.json
+            launch/DISCOVERABILITY.md
+            launch/HN-COMMENT-PREP.md
+            launch/NAME-CANDIDATES.md
+            launch/POSTS.md
+            launch/PUBLISH-CHECKLIST.md
+            launch/REACH.md
+            launch/REDDIT-PRESENCE.md
+            launch/RULES-REGISTRY.md
+            launch/writeups/01-hook-not-running.md
+            launch/writeups/02-denylist-of-readers.md
+            launch/writeups/03-counters-counting-fixtures.md
+            launch/writeups/04-eval-that-scores-perfect.md
+            launch/writeups/05-green-check-red-message.md
+            launch/writeups/06-tokenizer-punctuation-shadow.md
+            launch/writeups/07-writing-the-postmortem-caused-the-bug.md
+            launch/writeups/08-build-gate-that-skipped-the-build.md
+            launch/writeups/09-marker-the-vendor-dropped.md
+            launch/writeups/10-fourteen-blocks-zero-commands.md
+            launch/writeups/SCHEDULE.md
+            ops/DOGFOOD.md
+            ops/MY-SETUP.md
+            ops/SETUP-BY-HAND.md
+            ops/SETUP-RESEARCH.md
+            scripts/progress-snapshot.sh
+            verification/precompact-hook-proof.txt
+            verification/precompact-hook.log
+included: 306 path(s)
+
+identity: publication rehearsal <rehearsal@localhost> (set explicitly, never inherited from git config)
+
+Next: SCAN_REF=publish ./scripts/pre-public-scan.sh
+
+--- 3. scan the publication ref at full strictness ---
+=== PRE-PUBLIC SCAN ===
+captured:  2026-08-26T11:13:23Z
+repo:      ~/repo
+scope:     history (publish)
+classes:   all
+head:      0a69f6939a753490fc940ec550c2cf413a8295b8
+gitleaks:  8.30.1
+
+--- PASS 1: gitleaks, full history ---
+CLEAN    gitleaks: 0 findings across 1 commit(s)
+
+--- PASS 2: pattern scan, every blob in history ---
+         identity strings derived for this machine: 12 (not printed)
+         blobs scanned: 289 (of 348 candidates)
+CLEAN    pattern scan: 0 findings
+
+--- PASS 3: commit metadata (author and committer identity) ---
+CLEAN    commit metadata: 0 of 1 commit(s) carry a machine identity
+
+objects considered: 350
+
+=== SCAN CLEAN - safe to publish this history ===
+
+=== REHEARSAL CLEAN - what publication would push scans clean, both passes ===

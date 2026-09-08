@@ -1,0 +1,90 @@
+
+=== 0. Preconditions ===================================================
+  restic: restic 0.19.1 compiled with go1.26.5 on darwin/arm64
+  node:   v25.5.0
+  snapshot under test: usewarden-corpus-2026-08-26T10-47-40Z.db
+  sha256: 641777589807fde08bd6e34a6fc220928d1aae107b56278ac329f218bf6e04ab
+
+=== 1. The corpus under test is real (asserted BEFORE any restore) =====
+  sessions=22 events=5797 incidents=62 live-incidents=58
+  PASS  source holds at least one REAL incident (58)
+  PASS  source holds a real event stream (5797 events)
+  witness incident: 8 commands.deny[9] (npm-publish) e9cd3f1a-d8b0-4d4c-af81-e41dae7ee2d6
+  PASS  a named witness incident exists to look for after the restore
+
+=== 2. restic round trip (local throwaway repo, no password, no remote) 
+
+processed 4 files, 13.317 MiB in 0:00
+snapshot 3de8560d saved
+[0:00] 100.00%  1 / 1 snapshots
+no errors were found
+restoring snapshot 3de8560d of [~/dev/warden/corpus-backup] at 2026-08-26 16:31:46.15096 +0530 +0530 by <email> to ~/dev/warden/.usewarden-tmp/corpus-proof/restored
+Summary: Restored 9 files/dirs (13.317 MiB) in 0:00
+  PASS  restored file exists at usewarden-corpus-2026-08-26T10-47-40Z.db
+  restored sha256: 641777589807fde08bd6e34a6fc220928d1aae107b56278ac329f218bf6e04ab
+  PASS  restored copy is BYTE-IDENTICAL to the snapshot
+
+=== 3. Read a real receipt OUT OF THE RESTORED COPY ====================
+  reading the receipt for session e9cd3f1a-d8b0-4d4c-af81-e41dae7ee2d6 out of the restored database
+
+  usewarden receipt  claude  session e9cd3f1a…
+
+  session     2026-08-20 09:57:14Z → 2026-08-20 14:21:55Z  (4h 24m)
+  boundary    session-end-hook  — the agent's own session-end hook fired
+  project     ~/dev/warden
+  goal        "Prepare the triage bot workflow for the public repo the same …"
+
+  did         589 events · 10 files touched · 560 commands run
+  caught      12 blocked · 3 warned · 1 outside scope
+  context     unavailable — no agent currently reports context fill to usewarden —
+              no adapter populates it, so context.warn_pct cannot fire in production
+              either (D-224). This is not a gap in this session; it is a gap in the
+              product.
+  guardian    unavailable — 54 judge call(s) in this database predate schema v3 and
+              carry no session, so none can be attributed here
+
+  Run usewarden incidents to see the cards for what was caught.
+  PASS  the receipt read from the RESTORED copy reports what that session had blocked
+  cards naming commands.deny[9]: 14
+  PASS  the incident cards from the RESTORED copy still name the witness rule commands.deny[9]
+
+  usewarden week  the last 365 days · real agent sessions only
+
+  13 sessions  ·  5,793 events inspected  ·  claude  ·  2 projects
+
+  53 blocked   5 warned
+
+     20  commands.deny[0] (rm-rf-outside-repo)
+     14  commands.deny[9] (npm-publish)
+      5  commands.deny[6] (dotenv-access)
+      4  judge.drift
+      4  scope.forbidden_paths[10]
+      3  scope.allowed_paths
+      2  commands.deny[1] (force-push-protected)
+      2  commands.deny[4] (sudo)
+      2  scope.forbidden_paths (.env via bash)
+      1  commands.deny[3] (curl-pipe-shell)
+      1  commands.deny[8] (chmod-777)
+
+  usewarden incidents   the card for each one, with the exact command
+
+  sessions
+    ! 2026-08-26  claude  9e0a34cd    416 ev  3b 0w
+    ! 2026-08-26  claude  951c5065    316 ev  2b 1w
+    ! 2026-08-26  claude  4baed8af    628 ev  4b 0w
+    ! 2026-08-26  claude  c76f5495     74 ev  1b 0w
+    · 2026-08-26  claude  607e6a71      2 ev  clean
+    ! 2026-08-26  claude  f0aae431    934 ev  5b 1w
+    · 2026-08-24  claude  5bda652f      1 ev  clean
+    · 2026-08-24  claude  26efa1ae      1 ev  clean
+  PASS  `usewarden week` runs against the restored copy and reports sessions
+
+=== 4. NEGATIVE CONTROL: prove this proof can fail =====================
+  truncated 7266304 bytes -> 4359782 bytes
+  integrity_check on the corrupted copy: REJECTED-database disk image is malformed
+  PASS  a corrupted snapshot is REJECTED by the same check that passed the good one
+
+=== RESULT =============================================================
+  PASS 9   FAIL 0
+  throwaway restic repo deleted: yes
+  CORPUS BACKUP PROVEN END TO END

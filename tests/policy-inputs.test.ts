@@ -116,7 +116,13 @@ describe('policy inputs: no rule may ship that cannot fire', () => {
     }
     // And the policy object has no top-level key that is neither covered nor deliberately exempt.
     // `version`, `judge` and `telemetry` are configuration, not rules that evaluate an event.
-    const exempt = new Set(['version', 'judge', 'telemetry', 'checkpoint']);
+    //
+    // `backup` was added in the same spirit and this control caught it on the first run, which is
+    // the control working: it reads no field of a NormalizedEvent and produces no verdict, so it
+    // cannot be a rule that silently cannot fire. What it CAN do is fail to fire for a different
+    // reason - an unset destination - and that is covered in tests/backup.test.ts by asserting it
+    // is off by default and by exercising both the throttled and the due paths.
+    const exempt = new Set(['version', 'judge', 'telemetry', 'checkpoint', 'backup']);
     for (const key of Object.keys(p)) {
       if (exempt.has(key)) continue;
       const covered = [...sections].some((s) => s === key || s.startsWith(`${key}.`));

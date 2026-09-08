@@ -1,0 +1,19 @@
+=== FINAL: read both repos back from the API ===
+2026-09-08T04:17:26Z
+--- djayamah/warden ---
+  success	CI	65cd55c2
+  success	CI	29920888
+  success	CI	f498dba9
+--- djayamah/usewarden ---
+  success	pages	92bc5375
+  success	CI	92bc5375
+  success	CI	477d16bb
+
+
+=== ALL 2 REPOSITOR(Y/IES) HEALTHY ===
+    no failed runs, no workflow that has never succeeded, no stale pull request.
+repo-health exit: 
+
+spend: $0.0000 of $15.00 — zero metered judge calls this run
+HALT: absent
+tree: dirty

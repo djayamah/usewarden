@@ -1,0 +1,26 @@
+=== metrics inflation, measured BEFORE any fix ===
+date: 2026-08-20T03:44:12Z
+HEAD: 474533a
+USEWARDEN_HOME: (temp sandbox, empty)
+
+--- three consecutive 'usewarden demo' runs, no agent, no real session ---
+  run: caught 4/4
+  run: caught 4/4
+  run: caught 4/4
+
+--- what 'usewarden status --json' then reports ---
+{
+  "counters": {
+    "events_seen": 8,
+    "actions_blocked": 12,
+    "catches": 12
+  },
+  "liveCatches": 0,
+  "totalCatches": 12
+}
+
+DEFECT 1: 12 'actions blocked' from zero real agent sessions. The demo writes into the
+          same counters the headline numbers are read from.
+DEFECT 2: 12 blocked actions but only 8 events inspected. Events are deduplicated on
+          replay; incidents are not, so a duplicate delivery double-counts a block.
+          A guardian cannot report more blocks than it saw events.

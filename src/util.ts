@@ -89,6 +89,60 @@ export function resolveUserPath(p: string, base?: string): string {
 }
 
 /**
+ * The system temp roots, spelled BOTH ways on purpose.
+ *
+ * On macOS `/tmp` is a symlink to `/private/tmp`, and an agent harness writes under the resolved
+ * spelling while a user types the short one. Resolving the symlink would settle it and is not
+ * available here: this is called from the replay path, where CLAUDE.md §1 forbids resolving a
+ * stored path at all (see Layer1Context.filesystem). Listing both is exact and touches no disk.
+ */
+function ephemeralRoots(): string[] {
+  const roots = ['/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp'];
+  const t = process.env['TMPDIR'];
+  if (t && t.trim() !== '') roots.push(path.resolve(t));
+  try { roots.push(path.resolve(os.tmpdir())); } catch { /* no tmpdir is not an error here */ }
+  return roots;
+}
+
+/**
+ * True when `abs` is inside the AGENT'S OWN SESSION SCRATCHPAD.
+ *
+ * WHY. Three of the labelled false positives were an agent blocked from writing to the scratch
+ * directory its own harness had created for it and told it to use — a path of the shape
+ * `/private/tmp/claude-<uid>/<slug>/<uuid>/scratchpad/notes.md`. Nothing of the user's is in
+ * there, it is not "outside the repository" in any sense a developer would recognise, and a
+ * guardrail that blocks an agent from using a scratchpad is objecting to the tooling rather than
+ * to the work.
+ *
+ * WHY IT IS THIS NARROW, WHICH IS THE PART WORTH READING. The first version of this treated the
+ * WHOLE of `/tmp` as in scope. It fixed five false positives instead of three and it was reverted,
+ * because the sabotage suite measured what it cost: Layer-1 catch rate fell from 15/17 (88.2%) to
+ * 12/17 (70.6%), and the two newly-missed cases were *write to a sibling repo* and *write to the
+ * home directory* — the two most valuable catches in the whole suite. The suite builds its
+ * fixtures under `os.tmpdir()`, so a blanket temp exemption did not merely fail to catch them, it
+ * made the suite structurally incapable of testing scope at all.
+ *
+ * That is worth stating plainly rather than burying: a rule that raises precision by switching off
+ * the check is not a precision fix, and the only reason it was caught is that the sabotage suite
+ * asserts a catch RATE rather than a list of passes. A path is ephemeral only if it is under a
+ * temp root AND has a path segment named exactly `scratchpad`. No test fixture in this repository
+ * uses that segment, which is asserted rather than assumed.
+ *
+ * Still narrower than it looks: `forbidden_paths` is evaluated BEFORE this, so a credential file
+ * under a scratchpad is still refused; and an unresolvable target such as `rm -rf "$T"` is refused
+ * before this is consulted, because a variable could hold anything.
+ */
+export function isEphemeralPath(abs: string): boolean {
+  const target = path.resolve(abs);
+  const segments = target.split(path.sep);
+  if (!segments.includes('scratchpad')) return false;
+  for (const root of ephemeralRoots()) {
+    if (target !== root && isInside(root, target)) return true;
+  }
+  return false;
+}
+
+/**
  * Collapse the user's home directory to `~` for DISPLAY ONLY.
  *
  * The dashboard and the incident cards are the two things people screenshot and paste into

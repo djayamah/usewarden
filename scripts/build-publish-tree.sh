@@ -109,7 +109,7 @@ if [ -z "${PUBLISH_IDENTITY:-}" ]; then
   echo "FATAL: PUBLISH_IDENTITY is not set. Publication commits get an identity chosen on" >&2
   echo "       purpose, not one inherited from this machine's git config." >&2
   echo "" >&2
-  echo "       PUBLISH_IDENTITY='Your Name <you@example.com>' $0 $*" >&2
+  echo "       PUBLISH_IDENTITY='Your Name <<email-redacted>>' $0 $*" >&2
   echo "" >&2
   echo "       The value to use for a real publication is in ops/MY-SETUP.md, which is not" >&2
   echo "       published. scripts/publish-rehearsal.sh sets its own throwaway identity." >&2

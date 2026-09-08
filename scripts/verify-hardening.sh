@@ -84,6 +84,43 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 1b. Disclosure channel and secret scanning
+#
+#     Added 2026-08-20. Private vulnerability reporting was found DISABLED while SECURITY.md
+#     already named it the preferred route, which meant the project had no working security
+#     contact at all - a documented channel that does not exist is worse than an undocumented
+#     one, because a reporter follows it and lands nowhere. Verified here so it cannot silently
+#     revert.
+# ---------------------------------------------------------------------------
+if [ $GH_OK -eq 1 ]; then
+  if PVR="$(gh api "repos/$REPO_SLUG/private-vulnerability-reporting" --jq .enabled 2>/dev/null)"; then
+    [ "$PVR" = "true" ] \
+      && row PASS "private vulnerability reporting ENABLED" "SECURITY.md names it as the whole disclosure channel" \
+      || row FAIL "private vulnerability reporting ENABLED" "disabled, but SECURITY.md points reporters at it"
+  else
+    row UNVERIFIED "private vulnerability reporting" "endpoint unreadable with this token"
+  fi
+
+  if SA="$(gh api "repos/$REPO_SLUG" --jq '.security_and_analysis.secret_scanning.status + "/" + .security_and_analysis.secret_scanning_push_protection.status' 2>/dev/null)"; then
+    case "$SA" in
+      enabled/enabled) row PASS "secret scanning + push protection" "$SA" ;;
+      *)               row FAIL "secret scanning + push protection" "$SA - push protection refuses a commit that CONTAINS a credential" ;;
+    esac
+  else
+    row UNVERIFIED "secret scanning" "not readable with this token"
+  fi
+
+  # SECURITY.md must not ship a placeholder or an unrotatable personal address.
+  if grep -q "SECURITY_CONTACT_PLACEHOLDER" "$ROOT/SECURITY.md" 2>/dev/null; then
+    row FAIL "SECURITY.md has a real disclosure route" "the contact placeholder is still in the file"
+  elif grep -qE "security/advisories/new" "$ROOT/SECURITY.md" 2>/dev/null; then
+    row PASS "SECURITY.md has a real disclosure route" "links the private advisory form; publishes no email address"
+  else
+    row FAIL "SECURITY.md has a real disclosure route" "no advisory link found"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # 2. Branch protection on the default branch
 #    Checked BOTH ways: rulesets (current) and the legacy branch-protection API.
 #    A 403 here on a private repo means the plan does not support it - that is a
@@ -243,6 +280,39 @@ else
     row PASS "no NPM_TOKEN anywhere in the workflow" "trusted publishing only (comments excluded)"
   fi
 
+  # STAGED PUBLISHING. The workflow must be able to STAGE and must not be able to release.
+  #
+  # Two independent controls; this checks the half that lives in this repository. The other half
+  # is the trusted publisher on npmjs.com being configured with --allow-stage-publish and NOT
+  # --allow-publish, which no script here can read - see ops/PUBLISH-TODAY.md step 6.
+  #
+  # Comments are stripped first, exactly as for the token check below: the workflow's header
+  # explains at length what it does NOT do, and a check that trips on its own documentation is a
+  # check nobody will trust.
+  WFCODE="$(sed 's/#.*$//' "$WF")"
+  if printf '%s' "$WFCODE" | grep -qE "npm[[:space:]]+stage[[:space:]]+publish"; then
+    row PASS "release is STAGED, not published" "the workflow uploads to the staging queue"
+  else
+    row FAIL "release is STAGED, not published" "no staging step found - a direct release cannot be gated on npm 2FA"
+  fi
+  if printf '%s' "$WFCODE" | grep -qE "npm[[:space:]]+publish([[:space:]]|$)"; then
+    row FAIL "the workflow cannot release on its own" "an executable direct-release command is present"
+  else
+    row PASS "the workflow cannot release on its own" "staging only; a human approves with a security key"
+  fi
+
+  # Node floor. `engines.node` is >=22.13.0 for CONSUMERS; npm documents >=22.14.0 for trusted
+  # AND staged publishing, and this job depends on both. A pin one patch under the floor of the
+  # feature the workflow is built on is the kind of thing that only fails on release day.
+  NODEPIN="$(grep -oE "node-version: *'[0-9]+\.[0-9]+\.[0-9]+'" "$WF" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1)"
+  if [ -z "$NODEPIN" ]; then
+    row UNVERIFIED "CI Node meets the publishing floor" "no exact node-version pin found in $WF"
+  elif [ "$(printf '22.14.0\n%s\n' "$NODEPIN" | sort -V | head -1)" = "22.14.0" ]; then
+    row PASS "CI Node meets the publishing floor" "$NODEPIN >= 22.14.0"
+  else
+    row FAIL "CI Node meets the publishing floor" "$NODEPIN is below npm's documented 22.14.0"
+  fi
+
   UNPINNED="$(grep -oE "uses: +[A-Za-z0-9._/-]+@[A-Za-z0-9._-]+" "$WF" | grep -vE "@[0-9a-f]{40}$" || true)"
   if [ -n "$UNPINNED" ]; then
     row FAIL "every action pinned to a commit SHA" "$(printf '%s' "$UNPINNED" | tr '\n' ' ')"
@@ -250,6 +320,93 @@ else
     NPINS="$(grep -cE "uses: +[A-Za-z0-9._/-]+@[0-9a-f]{40}" "$WF")"
     row PASS "every action pinned to a commit SHA" "$NPINS action(s), no tags"
   fi
+fi
+
+# ---------------------------------------------------------------------------
+# 5b. What is ALREADY published, not just what is about to be
+# ---------------------------------------------------------------------------
+#
+# Every publication scan this project runs is pointed at what we are ABOUT to ship. None was ever
+# pointed at what we ALREADY shipped, and the two are different questions: a file that went public
+# before a scan rule existed is invisible to every scan written since.
+#
+# That gap was not theoretical. `ops/BOT-SCOPE.md` carried an operator-identity string on the
+# public repository while the private tree had already been corrected, and no scan on either side
+# could see it - the private one because the file was fixed, the public one because nobody looked
+# (D-140).
+#
+# This fetches the public repository's CURRENT files and runs the same identity strings over them.
+# Read-only: it fetches, it never pushes.
+PUBLIC_REMOTE_URL="$(git remote get-url public 2>/dev/null || true)"
+if [ -z "$PUBLIC_REMOTE_URL" ]; then
+  row UNVERIFIED "the PUBLISHED tree carries no identity string" "no 'public' remote configured here"
+elif [ ! -x scripts/pre-public-scan.sh ]; then
+  row UNVERIFIED "the PUBLISHED tree carries no identity string" "scripts/pre-public-scan.sh is missing"
+elif ! git fetch -q public 2>/dev/null; then
+  row UNVERIFIED "the PUBLISHED tree carries no identity string" "could not fetch the public remote"
+else
+  # REUSE THE REAL SCANNER. Do not reimplement it.
+  #
+  # The first version of this check read scripts/scan-identity.txt directly and reported PASS on a
+  # repository where the exposed string was sitting in a file I had already read with my own eyes.
+  # The reason: that file holds the EXTRA strings, and the scanner DERIVES the machine hostname and
+  # account name on top of them - which is where the exposed string came from. A second copy of a
+  # rule drifts from the first (D-124), and here the drift was invisible because the wrong answer
+  # was the green one.
+  #
+  # pre-public-scan.sh takes any ref, so the already-published tree is just another ref.
+  #
+  # TWO ROWS, NOT ONE. This started as a single row and the single row was wrong, in a way that
+  # would have taught somebody to ignore it (D-142).
+  #
+  #   the published TREE     what a person who visits the repository reads TODAY.
+  #                          FIXABLE, by a PR. Must be green, and is.
+  #   the published HISTORY  every blob any commit ever carried. NOT fixable by a PR - only by a
+  #                          history rewrite, and on a public repository GitHub keeps unreachable
+  #                          objects fetchable by SHA for a long time afterwards anyway.
+  #
+  # Folding them together produced a row that could never go green no matter what anyone did,
+  # because the founder pushing the correct fix does not and cannot change the history behind it.
+  # A control that stays red after the correct action was taken is a control people stop reading,
+  # and the next real finding arrives in a row everyone has learned to skip.
+
+  # --- row 1: the tree, fetched live from GitHub -------------------------------------------
+  # Delegates to scripts/scan-published-head.sh, which asks GitHub what HEAD is right now over
+  # two independent routes, asserts the object it scans is the SHA GitHub named, and self-tests
+  # by planting identity strings in a copy of that tree and requiring the scan to block on them.
+  PUBHEAD="$(mktemp)"
+  ./scripts/scan-published-head.sh --self-test > "$PUBHEAD" 2>&1; PH_RC=$?
+  PUB_SHA="$(awk '/^HEAD \(git ls-remote\):/{print substr($NF,1,10)}' "$PUBHEAD")"
+  case $PH_RC in
+    0) row PASS "the PUBLISHED TREE carries no identity string" \
+         "live HEAD ${PUB_SHA:-?} fetched from GitHub, scan self-tested, 0 findings" ;;
+    3) row UNVERIFIED "the PUBLISHED TREE carries no identity string" \
+         "could not reach GitHub - the published tree was NOT examined" ;;
+    *) row FAIL "the PUBLISHED TREE carries no identity string" \
+         "$(grep -cE '^BLOCKER|^  FAIL' "$PUBHEAD" | tr -d ' ') finding(s) on live HEAD ${PUB_SHA:-?} - run: ./scripts/scan-published-head.sh" ;;
+  esac
+  rm -f "$PUBHEAD"
+
+  # --- row 2: the history behind it ---------------------------------------------------------
+  # Expected to FAIL, and the FAIL is a true statement about the posture rather than a defect -
+  # the same reasoning that keeps the gh-token scope row red. It is a founder decision (accept,
+  # or rewrite history and force-push, which is exception 1), not an engineering task, so it is
+  # reported plainly and left visible rather than explained away.
+  PUBSCAN="$(mktemp)"
+  if SCAN_REF=public/main SCAN_CLASSES=identity ./scripts/pre-public-scan.sh > "$PUBSCAN" 2>&1; then
+    row PASS "the PUBLISHED HISTORY carries no identity string" "SCAN_REF=public/main history is clean"
+  else
+    # The scan redacts matching lines itself, so this summary cannot leak the string.
+    # Report the COUNTS, not just "it failed". This row is expected to stay red - the findings
+    # are immutable without a history rewrite - so the only way it can still carry information is
+    # if a CHANGE in it is visible. A row that says the same thing forever is one nobody reads;
+    # a row that says "2 blobs, 1 commit, unchanged since 2026-08-21" is one where a 3 is loud.
+    PUB_BLOBS="$(awk '/^BLOCKER  pattern scan:/{print $4}' "$PUBSCAN")"
+    PUB_META="$(awk '/^BLOCKER  commit metadata:/{print $4}' "$PUBSCAN")"
+    row FAIL "the PUBLISHED HISTORY carries no identity string" \
+      "${PUB_BLOBS:-0} blob(s) + ${PUB_META:-0} commit header(s); baseline is 1 + 1 - NOT fixable by a PR, D-142/D-145"
+  fi
+  rm -f "$PUBSCAN"
 fi
 
 # ---------------------------------------------------------------------------
@@ -328,7 +485,45 @@ print(','.join(m.get('name','?') if isinstance(m,dict) else str(m) for m in (d i
 " 2>/dev/null)"
     if [ -n "$NPM_WHO" ] && printf '%s' "$MAINT" | grep -q "$NPM_WHO"; then
       row UNVERIFIED "npm 'require 2FA and disallow tokens'" "no public API for publishing-access - MANUAL: npmjs.com/package/$PKG/access"
-      row UNVERIFIED "npm trusted publisher configured" "no public API - MANUAL: npmjs.com/package/$PKG/access"
+
+      # THE TRUSTED PUBLISHER IS READABLE AFTER ALL - not as a SETTING, but as a FACT ABOUT WHAT
+      # WAS PUBLISHED, which is the better thing to check anyway.
+      #
+      # This row was UNVERIFIED for the whole life of the project on the correct grounds that npm
+      # exposes no read API for the trusted-publisher CONFIGURATION: GET on the access endpoint is
+      # 405, every other candidate path is 404, `npm access` has no getter, and npm's own docs
+      # describe the setting as web-UI-only (D-238). All still true.
+      #
+      # But the packument records HOW EACH VERSION GOT THERE, unauthenticated and public:
+      #
+      #   _npmUser.trustedPublisher.id   "github"  - published via a trusted publisher, over OIDC
+      #   _npmUser.name                  "GitHub Actions"      - not a human with a token
+      #   _npmUser.approver.name         the human who approved the staged artifact
+      #
+      # A setting says what is meant to happen; this says what DID happen, on the artifact users
+      # actually install. It cannot be satisfied by a publisher that is configured but unused, and
+      # it cannot be faked by a token publish. That is a stronger control than reading the page,
+      # and it is exactly what CLAUDE.md §4.3 means by "only production proves it fires".
+      #
+      # What it still does NOT prove, and is not claimed: that the permission is `stage publish`
+      # ONLY rather than also `publish`. Proving that needs either the settings page or an
+      # attempted direct publish, and the second is §7 exception 1 and is never to be attempted.
+      TP="$(npm view "$PKG@latest" _npmUser --json 2>/dev/null | python3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: raise SystemExit
+if not isinstance(d,dict): raise SystemExit
+tp=(d.get('trustedPublisher') or {}).get('id','')
+ap=(d.get('approver') or {}).get('name','')
+print('%s|%s|%s' % (tp, d.get('name',''), ap))
+" 2>/dev/null)"
+      TP_ID="${TP%%|*}"; TP_REST="${TP#*|}"; TP_WHO="${TP_REST%%|*}"; TP_APPROVER="${TP_REST#*|}"
+      if [ -n "$TP_ID" ]; then
+        row PASS "npm trusted publisher configured" \
+          "registry says $PKG@latest was published by '${TP_WHO}' via trusted publisher '${TP_ID}'${TP_APPROVER:+, approved by ${TP_APPROVER}}"
+      else
+        row UNVERIFIED "npm trusted publisher configured" "latest of '$PKG' carries no trustedPublisher - it may predate the publisher, or have been published with a token - MANUAL: npmjs.com/package/$PKG/access"
+      fi
     else
       row FAIL "npm package name '$PKG' is available or ours" "TAKEN by: ${MAINT:-unknown}. Pick another name - see launch/NAME-CANDIDATES.md"
       row UNVERIFIED "npm 'require 2FA and disallow tokens'" "cannot configure a package you do not own"
@@ -340,6 +535,31 @@ print(','.join(m.get('name','?') if isinstance(m,dict) else str(m) for m in (d i
     row UNVERIFIED "npm trusted publisher configured" "package '$PKG' is not published yet - chicken-and-egg, see ops/SETUP-BY-HAND.md"
   fi
   row UNVERIFIED "npm account 2FA enabled" "npm exposes no API for another party to read your 2FA state - MANUAL: npmjs.com/settings/~/profile"
+fi
+
+# ---------------------------------------------------------------------------
+# THE PRE-PUSH GUARD, ON THIS MACHINE
+# ---------------------------------------------------------------------------
+# The unit tests prove the hook REFUSES the public URL - they invoke it and check the exit code.
+# What they cannot prove is that git will ever invoke it, because that is `core.hooksPath` on one
+# machine, and a CI runner has never run the installer. Asserting it in the unit suite asserted a
+# falsehood on every CI leg; asserting it here asserts it exactly where it can be true, on the
+# machine that actually pushes.
+HOOKS_PATH="$(git config core.hooksPath 2>/dev/null || true)"
+if [ ! -x "$ROOT/.githooks/pre-push" ]; then
+  row FAIL "pre-push guard installed on this machine" ".githooks/pre-push is missing or not executable"
+elif [ "$HOOKS_PATH" = ".githooks" ]; then
+  # Present and pointed at is still not proof that it FIRES. Invoke it with the public URL and
+  # require a refusal - the same A/B the tests run, repeated against the real file on disk.
+  if printf '' | "$ROOT/.githooks/pre-push" public "https://github.com/djayamah/usewarden.git" >/dev/null 2>&1; then
+    row FAIL "pre-push guard refuses the public repository" "the hook ACCEPTED a push to the public repo URL"
+  else
+    row PASS "pre-push guard installed and refusing" "core.hooksPath=.githooks, public URL refused"
+  fi
+elif [ -z "$HOOKS_PATH" ]; then
+  row FAIL "pre-push guard installed on this machine" "core.hooksPath is unset - run scripts/install-git-hooks.sh"
+else
+  row FAIL "pre-push guard installed on this machine" "core.hooksPath points somewhere else, not .githooks"
 fi
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,16 @@
+=== READ BACK WHAT LANDED ===
+captured: 2026-09-08T00:45:32Z
+repo:     djayamah/usewarden
+
+PASS   GitHub API reports main = 1ee450e0b3
+PASS   the git wire protocol agrees
+
+--- the last three commits, as GitHub serves them ---
+  1ee450e0b3  2026-09-08T00:45:24Z  fix(dependabot): the `dependencies` label did not exist, so nothing was labelled (#32)
+  d8d1ead7c1  2026-08-26T06:34:10Z  release: 0.1.1 — the npm page still says "Not on npm yet", and only a publish fixes it (#29)
+  3a13454991  2026-08-26T06:24:50Z  docs: 0.1.0 is live on npm — install with npm, not clone-and-build (#28)
+
+--- condition 1 (after): scan the live public head ---
+PASS   published-HEAD scan: clean, and the scan self-tested first
+
+=== READ-BACK CLEAN - what is live is what was meant, and it scans clean ===

@@ -1,0 +1,50 @@
+=== PUBLISHED-HEAD SCAN ===
+captured:  2026-08-21T05:22:37Z
+remote:    https://github.com/djayamah/usewarden.git
+slug:      djayamah/usewarden
+HEAD (git ls-remote): 7429dbd457e02ce688b72466721effcd44a4375d
+HEAD (gh api main): 7429dbd457e02ce688b72466721effcd44a4375d  - AGREES
+scanning:  7429dbd457e02ce688b72466721effcd44a4375d (verified equal to the SHA GitHub reported this second)
+
+--- SELF-TEST: does this scan actually catch anything? ---
+  LANDED    the planted home-path string is really in 9cde671b39:SABOTAGE-home-path.md
+  LANDED    the planted operator-identity string is really in the sabotage tree (not printed)
+  LANDED    the base tree does not contain either planted file
+  LANDED    the sabotage commit header really carries a .local machine address
+  CAUGHT    the scan BLOCKED on the sabotage tree and named both planted file categories
+  CAUGHT    ...and flagged the planted commit HEADER, a surface no blob scan can see
+  CAUGHT    ...and reported them redacted, without echoing the string back
+  SELF-TEST PASS - a CLEAN from this scan below is worth reading
+
+=== PRE-PUBLIC SCAN ===
+captured:  2026-08-21T05:22:41Z
+repo:      ~/warden
+scope:     the FILES OF 7429dbd457e02ce688b72466721effcd44a4375d (what that ref publishes today, not its history)
+classes:   identity
+head:      7a7827dc6be2a7cbc2cd9f5ff169c52fa12665ff
+gitleaks:  8.30.1
+
+--- PASS 1: gitleaks, full history ---
+SKIPPED  gitleaks - this run is --classes=identity, and gitleaks looks for credentials
+
+--- PASS 2: pattern scan, every file in the tree of 7429dbd457e02ce688b72466721effcd44a4375d ---
+         identity strings derived for this machine: 11 (not printed)
+         files scanned: 126 (of 131 candidates)
+CLEAN    pattern scan: 0 findings
+
+--- PASS 3: commit metadata (author and committer identity) ---
+         scope: the tip commit only - ancestry is a history question, see --scope=history
+CLEAN    commit metadata: 0 of 1 commit(s) carry a machine identity
+
+objects considered: 132
+
+=== PATTERN PASS CLEAN - but gitleaks did NOT run. This is NOT the publication gate. ===
+    Run ./scripts/pre-public-scan.sh with gitleaks installed before any visibility change.
+
+=== PUBLISHED HEAD CLEAN - djayamah/usewarden@7429dbd457 carries no identity string ===
+
+    SCOPE, stated plainly so this is not over-read: this is the CURRENT FILES of the
+    published HEAD. It says nothing about the repository's HISTORY. A string that was
+    published once and later corrected stays reachable by SHA in a public repository for
+    a long time, and only a history rewrite removes it. That is a separate control and a
+    separate decision - see verify-hardening.sh and DECISIONS.md D-142.

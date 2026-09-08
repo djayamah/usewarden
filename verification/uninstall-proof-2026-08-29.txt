@@ -1,0 +1,37 @@
+=== USEWARDEN UNINSTALL PROOF — read from the files, not from an exit code ===
+date            2026-08-29T09:57:11Z
+pre-init backup ~/.usewarden/backups/2026-08-20T09-57-00-329Z
+
+---- ~/.claude/settings.json
+  pre-install : EXISTED  sha256=26846635908d8a6d58fe3f4eff5ce30aa3b27c5423a65e86f001c1de6e7baaf6
+  now         : EXISTS   sha256=a65e33794e6c65d8855358493c603677e9ded7a1c5e64a8b44a9e3cdfeb2cc21  bytes=255
+  usewarden refs remaining : 0
+  "hooks" container        : absent
+  differs; key-level delta (names only, no values): {"add":["agentPushNotifEnabled","inputNeededNotifEnabled"],"rm":[],"chg":[]}
+  VERDICT     : DIFFERS — see delta above. Judge by whether any key is usewarden's.
+
+---- ~/.gemini/settings.json
+  pre-install : DID NOT EXIST  (manifest: existed=false, backup=null)
+  now         : EXISTS   sha256=ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356  bytes=3
+  usewarden refs remaining : 0
+  "hooks" container        : absent
+  VERDICT     : FAIL (residue) — usewarden CREATED this file; byte-identical to
+                pre-install means ABSENT, and it is still here. No hooks remain,
+                so nothing can fire; the file itself is litter.
+
+---- ~/.codex/hooks.json
+  pre-install : DID NOT EXIST  (manifest: existed=false, backup=null)
+  now         : EXISTS   sha256=ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356  bytes=3
+  usewarden refs remaining : 0
+  "hooks" container        : absent
+  VERDICT     : FAIL (residue) — usewarden CREATED this file; byte-identical to
+                pre-install means ABSENT, and it is still here. No hooks remain,
+                so nothing can fire; the file itself is litter.
+
+=== SUMMARY ===
+  1. CAN USEWARDEN STILL FIRE?
+     NO — zero hook registrations remain in any file init touched.
+  2. IS THE MACHINE AS IT WAS BEFORE INSTALL?
+     files byte-identical to pre-install : 0 of 3
+     files left behind that init created : 2
+     files differing for other reasons   : 1  (delta printed above; judge by key names)

@@ -30,7 +30,7 @@ PY
 cat > "$SUSPECTER" <<'PY'
 import json, re, sys
 p = json.load(open(sys.argv[1]))[0]
-pat = re.compile(r'(^|/)(\.env|\.npmrc|\.git/|node_modules/|\.usewarden)|^(src|tests|fixtures|verification|scripts)/')
+pat = re.compile(r'(^|/)(\.env|\.npmrc|\.git/|node_modules/|\.usewarden)|^(src|tests|fixtures|verification|scripts|service|site)/')
 print('\n'.join(f['path'] for f in p['files'] if pat.search(f['path'])))
 PY
 

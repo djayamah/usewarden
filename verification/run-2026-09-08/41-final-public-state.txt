@@ -1,0 +1,20 @@
+=== FINAL PUBLIC REPO STATE ===
+2026-09-08T00:46:24Z
+--- open PRs ---
+  #33 ci: bump actions/deploy-pages from 5.0.0 to 5.0.1
+--- open issues ---
+  #14 Is this free or paid?  [question,unmatched]
+  #9 confused - do i need to pay for something?  [agent:claude,unmatched]
+--- CI on main ---
+    Issue triage  2026-09-08T00:46:18Z
+  skipped  Issue triage  2026-09-08T00:46:16Z
+  success  npm_and_yarn in /. - Update #1562889408  2026-09-08T00:45:32Z
+  success  github_actions in /. - Update #1562889409  2026-09-08T00:45:31Z
+--- labels ---
+  accessibility, adapter, agent:claude, bug, dependencies, docs-gap, documentation, 
+  duplicate, enhancement, good first issue, help wanted, invalid, question, unmatched, 
+  wontfix
+--- TRIAGE_BOT_ENABLED ---
+  TRIAGE_BOT_ENABLED=false
+--- Discussion #17 comment count (must still be 1, no reply) ---
+  comments: 1, replies: 0

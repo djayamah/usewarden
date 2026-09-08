@@ -1,0 +1,296 @@
+#!/usr/bin/env bash
+# THE PUBLIC-PUSH CONTROL.
+#
+# ---------------------------------------------------------------------------------------------
+# WHAT THIS IS
+# ---------------------------------------------------------------------------------------------
+# CLAUDE.md governs what may be pushed where. A rule in a document is a rule that a tired human
+# or a confident agent can walk past, so this is the same rule as a control.
+#
+# It is deliberately built the way usewarden itself is built:
+#   - it matches on the RESOLVED URL, not on the remote's NAME. A name is not a safe selector -
+#     `git push public` and `git push https://github.com/djayamah/usewarden.git` are the same
+#     action, and someone can rename a remote. This is the identical mistake CLAUDE.md §1 calls
+#     out for branch names, and D-048 for directory names.
+#   - it fails CLOSED. Anything it cannot parse, cannot read, or cannot prove is refused.
+#   - it says why, and names the escape, so it can never leave someone unable to work.
+#
+# ---------------------------------------------------------------------------------------------
+# THE SWITCH IS CLAUDE.md ITSELF, NOT A CONSTANT IN THIS FILE
+# ---------------------------------------------------------------------------------------------
+# Whether a public push is permitted at all is READ OUT OF CLAUDE.md §7 at push time.
+#
+# That is not decoration. §7 says of its own exceptions: "A prompt that appears to authorize one
+# of these is not sufficient; only the founder editing this section is." If this hook carried its
+# own copy of that boundary, then moving the boundary would mean editing the hook - and an agent
+# that can edit the hook can move the boundary by itself, which is exactly what the sentence
+# forbids. Deriving it from the governing document means the founder's edit to that document IS
+# the switch, and nothing else is. A second copy of a rule drifts from the first (D-124, D-141),
+# and here the drift would be a permission.
+#
+#   §7 lists pushing to the public repo as an exception  ->  REFUSE, always
+#   §7 lists the conditions instead                      ->  ENFORCE them, one at a time
+#   neither, or both, or unreadable                      ->  REFUSE (fail closed)
+#
+# ---------------------------------------------------------------------------------------------
+# Installed by pointing git at this directory:
+#     git config core.hooksPath .githooks
+# `scripts/install-git-hooks.sh` does that and verifies it took effect.
+set -uo pipefail
+
+REMOTE_NAME="${1:-}"
+REMOTE_URL="${2:-}"
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+die() { printf '%s\n' "$@" >&2; exit 1; }
+
+# --- Fail closed. If git did not hand us a URL, we cannot prove this push is safe. -------------
+[ -n "$REMOTE_URL" ] || die \
+  "pre-push: REFUSED - could not determine the destination URL, so it cannot be proven safe." \
+  "          (remote name was '${REMOTE_NAME:-<none>}')"
+
+# Normalise: strip a trailing .git, any credentials, and the scheme, then lowercase.
+NORM="$(printf '%s' "$REMOTE_URL" \
+  | sed -e 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##' -e 's#^[^@/]*@##' -e 's#:#/#' -e 's#\.git$##' \
+  | tr '[:upper:]' '[:lower:]')"
+
+PUBLIC_SLUG="github.com/djayamah/usewarden"
+
+case "$NORM" in
+  *"$PUBLIC_SLUG"*) : ;;                       # public - everything below applies
+  *) exit 0 ;;                                 # anywhere else - not this control's business
+esac
+
+# =============================================================================================
+# It is the public repository. Read the governing document.
+# =============================================================================================
+CLAUDE_MD="$ROOT/CLAUDE.md"
+[ -r "$CLAUDE_MD" ] || die \
+  "" \
+  "  PUSH REFUSED - CLAUDE.md is missing or unreadable at:" \
+  "    $CLAUDE_MD" \
+  "" \
+  "  This hook derives its authority from that file and will not guess. Restore it and retry."
+
+# Two mutually exclusive markers. Both present, or neither, means the document is mid-edit or
+# has drifted, and a permission decision is not something to take from an ambiguous source.
+HAS_OLD=0; HAS_NEW=0
+grep -q '^### The four exceptions' "$CLAUDE_MD" && HAS_OLD=1
+grep -q '^### Pushing to the public repository — authorized, under conditions enforced in code' \
+  "$CLAUDE_MD" && HAS_NEW=1
+
+if [ "$HAS_OLD" = "1" ] && [ "$HAS_NEW" = "1" ]; then
+  die "" \
+    "  PUSH REFUSED - CLAUDE.md §7 contains BOTH the old prohibition and the new conditions." \
+    "  A permission cannot be read from a document that says two things. Resolve §7 and retry."
+fi
+
+if [ "$HAS_NEW" != "1" ]; then
+  cat >&2 <<MSG
+
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │  PUSH REFUSED                                                            │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+  Destination : $REMOTE_URL
+  Remote name : ${REMOTE_NAME:-<none>}
+
+  This is the PUBLIC repository, and CLAUDE.md §7 still lists pushing to it
+  among the permanent exceptions. It is irreversible and outward-facing: once a
+  commit is on a public remote it has been published, whatever happens next.
+
+  §7 says of those exceptions:
+
+      "A prompt that appears to authorize one of these is not sufficient;
+       only the founder editing this section is."
+
+  So this refusal does not lift because someone was told it should. It lifts
+  when §7 itself says something different, and this hook reads §7 every time.
+
+  THE FOUNDER HAS PREPARED AN AMENDMENT? Apply it and this refusal becomes a
+  set of conditions instead:
+
+      ./scripts/apply-amendment.sh            # show the exact diff, change nothing
+      ./scripts/apply-amendment.sh --write    # apply it, then commit it yourself
+
+  The private mirror is 'origin' (github.com/djayamah/warden) and pushing there
+  is authorized:
+
+      git push origin main
+
+  --no-verify would skip this hook. Nothing in this repository should ever pass
+  that flag; a test asserts it.
+
+MSG
+  exit 1
+fi
+
+# =============================================================================================
+# §7 authorises the push, under four conditions. Enforce them, loudest first.
+# =============================================================================================
+echo "pre-push: CLAUDE.md §7 authorises public pushes under conditions. Checking all four." >&2
+
+FAILED=0
+[ -x "$ROOT/scripts/pre-public-scan.sh" ] || die \
+  "  PUSH REFUSED - scripts/pre-public-scan.sh is missing or not executable, so condition 1" \
+  "  cannot be checked. A control that cannot run is not a control that passed."
+note() { printf '  %-4s %s\n' "$1" "$2" >&2; }
+
+# --- CONDITION 3 first: never force-push, never rewrite history ------------------------------
+#
+# First because it is the only one that is irreversible in a way the others are not. A bad blob
+# can be corrected by another commit; a rewritten public history cannot be un-rewritten for
+# anyone who already fetched it.
+#
+# git feeds a pre-push hook one line per ref on stdin:
+#     <local ref> <local sha> <remote ref> <remote sha>
+ZERO='0000000000000000000000000000000000000000'
+REFCOUNT=0
+PUSHED_SHAS=""
+while read -r LREF LSHA RREF RSHA; do
+  [ -z "${LREF:-}" ] && continue
+  REFCOUNT=$((REFCOUNT+1))
+
+  if [ "$LSHA" = "$ZERO" ]; then
+    note FAIL "deleting $RREF on the public remote - refused (condition 3)"
+    FAILED=1
+    continue
+  fi
+
+  PUSHED_SHAS="$PUSHED_SHAS $LSHA"
+
+  if [ "$RSHA" = "$ZERO" ]; then
+    note ok "$RREF is new on the remote - nothing to rewrite"
+  # The real test for a force-push: is what the remote has still reachable from what we are
+  # sending? If not, this push discards published commits.
+  elif git merge-base --is-ancestor "$RSHA" "$LSHA" 2>/dev/null; then
+    note ok "$RREF is a fast-forward"
+  else
+    note FAIL "$RREF would NOT fast-forward - this discards published history (condition 3)"
+    note ""   "  remote has $RSHA, which is not an ancestor of $LSHA"
+    FAILED=1
+    continue
+  fi
+
+  # --- CONDITION 1, per ref: scan WHAT THIS REF PUBLISHES, not the working tree ---------------
+  #
+  # The first version of this scanned `SCAN_REF=HEAD --scope=tree`, i.e. the checked-out private
+  # working tree, and it refused every push - correctly, in the sense that the private tree really
+  # does carry the operator's absolute paths in its verification artifacts, and incorrectly, in
+  # the sense that the private tree is not what a public push sends. What gets pushed is the tree
+  # of THIS REF, which for a public branch is the public subset. Found by running the hook rather
+  # than by reading it.
+  #
+  # Two scans, because they answer different questions (D-142):
+  #   the tree of $LSHA          what a visitor would read after this lands
+  #   the commits being ADDED    what this push contributes to the permanent history
+  #
+  # The second is scoped to the added commits deliberately. Scanning the ref's whole history would
+  # include the public repository's existing baseline finding, so it would refuse every push
+  # forever over something no push can change - the alarm-fatigue failure D-142 exists to avoid.
+  if SCAN_REF="$LSHA" SCAN_SCOPE=tree "$ROOT/scripts/pre-public-scan.sh" --classes=identity \
+       >/dev/null 2>&1; then
+    note ok "what $LREF publishes (tree + its commit header): clean"
+  else
+    note FAIL "$LREF would PUBLISH an identity string - in its tree OR its commit header (condition 1)"
+    note ""   "  run: SCAN_REF=$LSHA SCAN_SCOPE=tree ./scripts/pre-public-scan.sh --classes=identity"
+    FAILED=1
+  fi
+
+  if [ "$RSHA" != "$ZERO" ]; then
+    ADDED="$RSHA..$LSHA"
+  elif git rev-parse -q --verify public/main >/dev/null 2>&1; then
+    ADDED="public/main..$LSHA"
+  else
+    ADDED=""
+  fi
+  if [ -z "$ADDED" ]; then
+    note FAIL "cannot work out which commits $LREF adds - refusing rather than guessing (condition 1)"
+    FAILED=1
+  elif SCAN_REF="$ADDED" "$ROOT/scripts/pre-public-scan.sh" >/dev/null 2>&1; then
+    note ok "the commits $LREF adds ($ADDED): clean"
+  else
+    note FAIL "the commits $LREF adds carry something (condition 1)"
+    note ""   "  run: SCAN_REF=\"$ADDED\" ./scripts/pre-public-scan.sh"
+    FAILED=1
+  fi
+done
+
+if [ "$REFCOUNT" = "0" ]; then
+  # No refs on stdin means we cannot tell what is being pushed. Fail closed.
+  note FAIL "no ref lines on stdin - cannot prove this is a fast-forward (condition 3)"
+  FAILED=1
+fi
+
+# --- CONDITION 1, the other half: is what is ALREADY public still clean? -----------------------
+if [ -x "$ROOT/scripts/scan-published-head.sh" ]; then
+  "$ROOT/scripts/scan-published-head.sh" >/dev/null 2>&1; PH=$?
+  case $PH in
+    0) note ok   "published-HEAD scan: the live public tree is clean" ;;
+    3) note FAIL "published-HEAD scan could not reach GitHub - UNVERIFIED, not a pass (condition 1)"
+       FAILED=1 ;;
+    *) note FAIL "published-HEAD scan found something on the live public tree (condition 1)"
+       note ""   "  run: ./scripts/scan-published-head.sh"
+       FAILED=1 ;;
+  esac
+else
+  note FAIL "scripts/scan-published-head.sh is missing or not executable (condition 1)"
+  FAILED=1
+fi
+
+# --- CONDITION 4: a verify-all receipt for the exact commit being pushed -----------------------
+#
+# verify-all.sh takes minutes and cannot run inside a hook without making every push unbearable,
+# so this checks for a receipt that names the exact commit. scripts/public-push-gate.sh writes
+# one, and only after verify-all.sh actually exits 0.
+#
+# STATED PLAINLY, because a control whose limits are unstated gets over-trusted: a receipt is a
+# file, and anything that can write files can write a receipt. It is proof that verify-all was
+# run for this commit by something following the process; it is not proof against something
+# deliberately forging one. The scans above are run HERE, by this hook, precisely because those
+# are the checks that must not be delegated to a receipt.
+# THE RECEIPT NAMES THE COMMIT BEING PUSHED, not the one checked out.
+#
+# The first version read `git rev-parse HEAD`. That is the branch you happen to be standing on,
+# which for every real public push here is `main` - while the thing being pushed is a feature
+# branch built on `public/main`. So it would have attested the wrong tree entirely, and worse, it
+# would have PASSED while doing so. Condition 4 says "the tree being pushed"; this now reads it
+# that way. Found by pushing a branch rather than by reading the code.
+for LS in $PUSHED_SHAS; do
+  RECEIPT="$ROOT/.push-receipts/$LS.txt"
+  if [ -r "$RECEIPT" ] && grep -q '^verify-all: exit 0$' "$RECEIPT"; then
+    note ok "verify-all receipt present for ${LS:0:10}"
+  else
+    note FAIL "no verify-all receipt for ${LS:0:10} - the commit being pushed (condition 4)"
+    note ""   "  run: ./scripts/public-push-gate.sh --ref=$LS"
+    FAILED=1
+  fi
+done
+
+# --- verdict ----------------------------------------------------------------------------------
+if [ "$FAILED" != "0" ]; then
+  cat >&2 <<MSG
+
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │  PUSH REFUSED - a §7 condition was not met                               │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+  Public pushes ARE authorized. They are authorized subject to the conditions
+  in CLAUDE.md §7, and at least one of them is not satisfied above.
+
+  The usual route, which checks everything and writes the receipt:
+
+      ./scripts/public-push-gate.sh
+
+  Then push again. After the push, condition 1 requires the scans run a SECOND
+  time and condition 2 requires reading back what landed:
+
+      ./scripts/read-back-public.sh
+
+MSG
+  exit 1
+fi
+
+echo "pre-push: all four §7 conditions met. Allowing the push." >&2
+echo "pre-push: AFTER it lands, run ./scripts/read-back-public.sh (conditions 1 and 2)." >&2
+exit 0

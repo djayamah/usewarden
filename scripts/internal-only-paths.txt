@@ -29,6 +29,48 @@ BUILD_COMPLETE
 launch/
 ops/SETUP-
 ops/MY-SETUP
+# backups/ holds VERBATIM COPIES OF THE OPERATOR'S OWN AGENT CONFIGURATION - the `~/.claude`,
+# `~/.gemini` and `~/.codex` files usewarden backs up before it touches them, which CLAUDE.md §3
+# REQUIRES it to keep. Those are personal files: model choice, permission mode, notification and
+# theme settings, and whatever else the vendor decides to put in them next. They were tracked and
+# were NOT excluded, so the next full publish would have shipped them (D-244). Nothing here can be
+# redacted into safety either - the point of a backup is that it is byte-identical.
+backups/
 \.claude/
 scripts/progress-snapshot\.sh
 verification/precompact-hook
+# corpus-backup/ holds SNAPSHOTS OF THE LIVE RECORD - every command a real agent ran on this
+# machine, every blocked target, every session goal. It is gitignored, so it cannot reach a ref
+# the scanner walks; it is named here anyway because the publisher and the sanitiser must agree
+# with the scanner about it, and a directory that is safe only because of .gitignore is one
+# `git add -f` away from not being (D-248).
+corpus-backup/
+# ops/DOGFOOD.md is A REPORT ABOUT THE OPERATOR'S OWN MACHINE, and its own first line says so:
+# "This file is for you, not for users." It names their private notes directory by name, quotes
+# what an agent tried to read out of it, names their home path and lists which of their agent
+# configs hold usewarden's hooks. It is NOT on public/main today only because the last full
+# publish predates it - it was not excluded, so the next one would have shipped it. Same class as
+# backups/ (D-244), found the same way: by pointing the identity scan at what we already had
+# rather than only at what we were about to publish (D-254).
+#
+# Unlike backups/, this one COULD be redacted without lying. It is excluded anyway, because a
+# redacted report about one machine has no value to a public reader and a real privacy cost to
+# the person it is about. The public-facing version of what it says lives in docs/RETENTION.md.
+ops/DOGFOOD\.md
+# verification/dogfood/ and verification/policy-drift-2026-08-29/ are REPORTS ABOUT THE OPERATOR'S
+# OWN MACHINE, in exactly the sense ops/DOGFOOD.md above already is: real session goals, real
+# commands, which of their projects an agent reached into and when. Neither is currently on
+# public/main - the last full publish predates both - so this excludes them rather than removing
+# anything already published.
+#
+# Same reasoning as ops/DOGFOOD.md, and it is worth restating because it is NOT the "redacting it
+# would make it lie" rule: both COULD be redacted without lying, and the sanitiser now does redact
+# every private directory name in them. They are excluded anyway, because a redacted forensic
+# report about one person's machine has almost no value to a public reader and a real privacy cost
+# to the person it is about. The PUBLIC version of what they say is already in SECURITY.md's
+# known-issues table, CHANGELOG.md and docs/RETENTION.md, which is where a user would look.
+#
+# This is the narrower reading, and the narrower reading is the reversible one: the founder can
+# publish these later, and cannot unpublish them.
+verification/dogfood/
+verification/policy-drift-2026-08-29/

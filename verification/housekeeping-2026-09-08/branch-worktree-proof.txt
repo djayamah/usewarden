@@ -1,0 +1,57 @@
+HOUSEKEEPING PROOF — branches and worktrees
+Generated: 2026-09-08T06:40:17Z
+Repo (resolved): /Users/you/dev/warden
+
+CRITERION FOR DELETION (both must hold):
+  (a) the branch name exists on NO remote (git ls-remote --heads on origin and public)
+  (b) every file the branch changed relative to its merge-base with public/main is
+      byte-identical on public/main, OR differs only because public/main moved FORWARD
+      past it (branch is the older state, its own contribution present).
+  (b) is strictly stronger than 'regenerable by re-running the pipeline': the work is
+      already preserved on a GitHub remote, so no regeneration is required at all.
+
+=== REMOTE HEADS (the only branch names that exist remotely) ===
+origin:
+  61f0cd2c67094e28ffc53c2664c3c92a4e9c6e48	refs/heads/main
+public:
+  92bc5375e78642be91ccdcaa042094e59d763219	refs/heads/main
+
+=== PER-BRANCH EVIDENCE ===
+BRANCH               TIP          TOUCHED  DIFFERING VERDICT
+bot-repin            2cb124f7c1   1        0         ABSORBED (identical on public/main)
+demo-card-fix        b19543583a   4        0         ABSORBED (identical on public/main)
+full-sync            b239aae2d9   36       0         ABSORBED (identical on public/main)
+public-bot-corpus    237a7edd6c   10       0         ABSORBED (identical on public/main)
+public-scan-sync     964475869a   6        0         ABSORBED (identical on public/main)
+readme-npm-live      6d27ea842a   1        1         SUPERSEDED (public/main newer; see note)
+release-0-1-1        06a44d5c69   2        0         ABSORBED (identical on public/main)
+release-fixes        0bdfd433a5   5        0         ABSORBED (identical on public/main)
+release-npm-pin      71e92ac767   1        1         SUPERSEDED (public/main newer; see note)
+release-staged       c65a40e5c7   2        0         ABSORBED (identical on public/main)
+site-launch          0c17d33bdf   11       0         ABSORBED (identical on public/main)
+site-nav             4fb6c3d055   2        0         ABSORBED (identical on public/main)
+triage-bot           a9654b4728   21       0         ABSORBED (identical on public/main)
+triage-bot-fix       c9fbadaec8   13       0         ABSORBED (identical on public/main)
+
+NOTE on the two SUPERSEDED branches:
+  readme-npm-live (6d27ea8) — its contribution was 'install with npm, not clone-and-build'.
+    public/main:README.md line 57 carries 'npm install -g usewarden'. The residual diff is
+    the LATER pricing block (issues #9/#14) that public/main gained after this branch.
+  release-npm-pin (71e92ac) — its contribution was pinning npm off @latest.
+    public/main:.github/workflows/release.yml lines 94-112 carry the pin and the rationale.
+    The residual diff is the LATER stage-id capture from release-fixes.
+  In both cases the branch is the OLDER state. Deleting loses nothing.
+Deleted branch bot-repin (was 2cb124f).
+Deleted branch demo-card-fix (was b195435).
+Deleted branch full-sync (was b239aae).
+Deleted branch public-bot-corpus (was 237a7ed).
+Deleted branch public-scan-sync (was 9644758).
+Deleted branch readme-npm-live (was 6d27ea8).
+Deleted branch release-0-1-1 (was 06a44d5).
+Deleted branch release-fixes (was 0bdfd43).
+Deleted branch release-npm-pin (was 71e92ac).
+Deleted branch release-staged (was c65a40e).
+Deleted branch site-launch (was 0c17d33).
+Deleted branch site-nav (was 4fb6c3d).
+Deleted branch triage-bot (was a9654b4).
+Deleted branch triage-bot-fix (was c9fbada).

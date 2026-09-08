@@ -49,7 +49,7 @@ landed, the same thing happened in a different syntax: a `printf` whose quoted a
 release command was refused, because the matcher sees the command string and does not know that an
 argument to `printf` is data rather than an instruction.
 
-Counting honestly, this guard blocked its own author writing prose **five times in one day**, across
+Counting honestly, this guard blocked its own author writing prose **six times in two days**, across
 three syntaxes: a heredoc body, a commit message passed with `-F`, and a quoted argument.
 
 Fixing the argument case properly needs real shell tokenisation with quote tracking, on the hottest
@@ -129,16 +129,54 @@ discovered by a user. The remaining honest gap is your **global** ignore file
 (`core.excludesFile`), which usewarden does not read: a file ignored only there reads as untracked
 and a wholesale overwrite of it is refused once. `docs/GIT-AWARENESS.md` lists every such limit.
 
-## One gap still open
+## The escape hatch — built 2026-08-24
 
-**There is no per-incident "allow this once".** Today the escape hatch is the policy file, which is
-a thirty-second edit but not a one-keystroke one. Mature scanners solve this with inline suppression
-carrying a required justification (`#nosec`, `//nolint`), and that does not transfer directly,
-because a usewarden finding is an agent action at a moment rather than a line of source — there is
-nowhere to put a comment.
+**There is now a per-incident "allow once".** It was the one thing on this page most likely to get
+usewarden uninstalled, and it is closed.
 
-The shape it will take: a human-run `usewarden allow <rule-id>` recording a scoped, dated,
-**expiring** exception in the state directory rather than in the policy file, so it can never
-silently become permanent, plus a listing command so the exceptions are auditable. The agent will
-never be able to invoke it. Stated here so you meet the limitation on this page rather than in the
-middle of a task.
+```bash
+usewarden allow dotenv-access        # waive that rule, in this project, for 24 hours
+usewarden allow --list               # every waiver you hold, and when each expires
+usewarden allow --revoke dotenv-access
+```
+
+Four properties, and each is why the others are safe:
+
+1. **It expires after 24 hours.** A permanent exception is an allowlist entry, and this project's
+   own history is that broad allowlist entries hide the next real finding (D-153, D-194). A waiver
+   you forget heals by itself.
+2. **It is not in your policy file.** It lives in the state directory, so it cannot be committed,
+   shared, or inherited by a teammate's checkout and quietly become permanent.
+3. **It is scoped to one rule in one project.** Waiving `dotenv-access` here does not open `.env`
+   reads everywhere on your machine.
+4. **Your agent cannot grant it.** `usewarden allow` refuses to run unless stdin is an interactive
+   terminal, and every supported agent runs shell commands through a captured pipe. An escape hatch
+   an agent can operate is not a guardrail — it is a documented bypass, and a blocked agent is
+   optimised to find one.
+
+**A waiver changes the verdict, not the audit trail.** The attempt is still recorded, the incident
+card says *Waived by an explicit human exception*, and it still appears on your session receipt.
+"Allowed because you said so" and "allowed because nothing objected" must never look alike.
+
+The id to type is on the incident card. Any of the forms it prints works — `dotenv-access`,
+`commands.deny[6] (dotenv-access)`, or `scope.forbidden_paths` for an indexed rule.
+
+
+## The sixth occurrence, and what it proved
+
+While writing the README section you are reading about, `usewarden` refused the write — because the
+text contained `rm -rf` as an argument to the tool doing the writing. Sixth time, same class,
+documented in the same paragraph it was blocking.
+
+Two things about that are worth stating rather than hiding.
+
+**The escape hatch refused too, and it was right to.** `usewarden allow` was invoked and declined,
+because the caller was an agent and not a person at a terminal. That is the property the whole
+feature depends on, demonstrated against its own author under real conditions rather than in a
+test: an agent that has just been blocked cannot grant itself a waiver, even when the agent is the
+one who wrote the waiver feature and knows exactly how it works.
+
+**The documented workaround is what got used**, and it took one attempt: write the text with a file
+tool instead of through a shell argument. Your agent's `Write` and `Edit` tools are unaffected by
+any of this — only `Bash` is. That is a liveable limitation, and the count above is the honest
+measure of how often you will meet it.

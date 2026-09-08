@@ -1,0 +1,14 @@
+repo:     djayamah/usewarden
+
+PASS   GitHub API reports main = 92bc5375e7
+PASS   the git wire protocol agrees
+
+--- the last three commits, as GitHub serves them ---
+  92bc5375e7  2026-09-08T04:10:09Z  docs: two strangers asked if this costs money before asking anything else (#34)
+  b47fe47c61  2026-09-08T00:48:36Z  ci: bump actions/deploy-pages from 5.0.0 to 5.0.1 (#33)
+  1ee450e0b3  2026-09-08T00:45:24Z  fix(dependabot): the `dependencies` label did not exist, so nothing was labelled (#32)
+
+--- condition 1 (after): scan the live public head ---
+PASS   published-HEAD scan: clean, and the scan self-tested first
+
+=== READ-BACK CLEAN - what is live is what was meant, and it scans clean ===

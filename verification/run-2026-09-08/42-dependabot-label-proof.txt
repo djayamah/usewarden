@@ -1,0 +1,17 @@
+=== THE PROOF: did DEPENDABOT ITSELF apply the label on a NEW PR? ===
+2026-09-08T00:46:59Z
+PR #33 was opened by Dependabot at 2026-09-08T00:46:05Z, AFTER the config landed at 00:45:25Z.
+
+--- labels on #33, read back from the API ---
+  labels: dependencies  (author: dependabot[bot])
+
+--- and NO "labels could not be found" comment this time ---
+  no comments at all
+
+--- compare: the same bot comment that WAS on #31 ---
+  dependabot[bot]: ### Labels
+
+The following labels could not be found: `dependencies`. Please create it before Dependabot can ad
+
+--- and the ignore rules held: no @types/node or typescript PR was recreated ---
+  #33 ci: bump actions/deploy-pages from 5.0.0 to 5.0.1

@@ -1,6 +1,7 @@
 import './boot.js';
 import { Store } from './store.js';
 import { buildStatus } from './status.js';
+import { isWeaker } from './policy/drift.js';
 import { readStdin } from './hook.js';
 import { buildReceipt, latestSessionId, receiptStatusLine } from './receipt.js';
 
@@ -23,7 +24,10 @@ export async function runStatusLine(): Promise<number> {
   let line = 'usewarden ?';
   const store = new Store();
   try {
-    const r = buildStatus(store, process.cwd());
+    // 'probes' rather than 'full': the corpus replay is the only part that grows with history,
+    // and this runs on every prompt. A status line that costs milliseconds is a status line the
+    // user turns off — which would be the same failure as not checking at all.
+    const r = buildStatus(store, process.cwd(), 'probes');
     const badge = r.overall === 'PROTECTED' ? 'usewarden ok' : `usewarden ${r.overall}`;
     // Real sessions only. A status line that counts demo runs is a status line that lies.
     const blocked = r.metrics.live.attempts;
@@ -32,6 +36,9 @@ export async function runStatusLine(): Promise<number> {
     if (blocked) parts.push(`${blocked} blocked`);
     if (drift) parts.push(`${drift} drift`);
     if (r.unlocked) parts.push('UNLOCKED');
+    // The one thing on this line that is about usewarden's own rules rather than the agent's
+    // registration. Short, because the line is one line; `usewarden policy --drift` has the list.
+    if (isWeaker(r.drift)) parts.push('POLICY WEAKENED');
 
     // THE RECEIPT'S ONE-LINE FORM. It is the only thing here that says anything about the session
     // the user is actually in, and on a clean session it is the only thing that says anything at

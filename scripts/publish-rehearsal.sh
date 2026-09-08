@@ -73,6 +73,26 @@ echo "--- 3. scan the publication ref at full strictness ---"
 SCAN_REF=publish ./scripts/pre-public-scan.sh
 RC=$?
 
+echo
+echo "--- 4. no directory the operator's own policy calls private ---"
+# THE TREE THIS ASKS ABOUT IS THE ONLY ONE WORTH ASKING ABOUT. The first wiring of this check ran
+# it over the WORKING tree from verify-all.sh, where it failed forever and correctly: CLAUDE.md,
+# SPEC-BUILD.md and ops/DOGFOOD.md all name the operator's private directories on purpose, and all
+# three are dropped by build-publish-tree.sh before anything is pushed. A gate aimed at a tree
+# nobody publishes produces a permanent red that teaches people to ignore it.
+#
+# It runs HERE, after the publication tree exists, against `publish` — and the copy of the untracked
+# identity file this rehearsal already carried across is what lets it derive anything at all.
+# On CI, where the operator's policy does not exist, the script exits 3 and this reports it as
+# UNVERIFIED rather than folding it into the green.
+USEWARDEN_HOME="${USEWARDEN_HOME:-$HOME/.usewarden}" ./scripts/scan-operator-privacy.sh --ref=publish
+PRC=$?
+if [ $PRC -eq 3 ]; then
+  echo "    UNVERIFIED - no operator policy on this machine. Not a pass (CLAUDE.md 4.4)."
+elif [ $PRC -ne 0 ]; then
+  RC=$PRC
+fi
+
 cd "$ROOT"
 echo
 if [ $RC -ne 0 ]; then

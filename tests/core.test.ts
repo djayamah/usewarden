@@ -332,13 +332,32 @@ describe('store', () => {
       const evCols = (legacy.db.prepare('PRAGMA table_info(events)').all() as { name: string }[])
         .map((c) => c.name);
       assert.equal(evCols.includes('context_fill'), false, 'setup failed - events already has context_fill');
+      const incCols = (legacy.db.prepare('PRAGMA table_info(incidents)').all() as { name: string }[])
+        .map((c) => c.name);
+      assert.equal(incCols.includes('action_json'), false, 'setup failed - incidents already has action_json');
       legacy.close();
     }
 
     const migrated = new Store(f);
-    // FORWARD-ONLY, AND IT MUST CROSS BOTH STEPS IN ONE OPEN. A v1 database on disk has never
-    // seen v2 either, so this pins v1 -> v3 rather than v1 -> v2 twice.
-    assert.equal(migrated.getMeta('schema_version'), '3');
+    // FORWARD-ONLY, AND IT MUST CROSS EVERY STEP IN ONE OPEN. A v1 database on disk has never
+    // seen v2 or v3 either, so this pins v1 -> v4 rather than one step repeated.
+    assert.equal(migrated.getMeta('schema_version'), '4');
+
+    // v4 added the replay input. It arrives NULL and is NOT backfilled: a pre-v4 row genuinely
+    // does not carry its own, and inventing one from the truncated display string would
+    // manufacture a command the agent never ran. The row is still replayable, because
+    // `replayCorpus()` recovers it from the events table at READ time and says so - which is
+    // asserted below rather than assumed.
+    const incCols2 = (migrated.db.prepare('PRAGMA table_info(incidents)').all() as { name: string }[])
+      .map((c) => c.name);
+    assert.ok(incCols2.includes('action_json'), 'v4 must add incidents.action_json');
+    const stored = migrated.db.prepare('SELECT COUNT(*) c FROM incidents WHERE action_json IS NOT NULL').get() as { c: number };
+    assert.equal(Number(stored.c), 0, 'the migration must NOT backfill action_json');
+
+    const corpus = migrated.replayCorpus('live');
+    assert.equal(corpus.length, 1, 'the one live incident must survive');
+    assert.equal(corpus[0]!.provenance, 'recovered',
+      'a pre-v4 live row must be labelled recovered, never stored and never silently dropped');
 
     // v3 added the two columns the session receipt derives from. They arrive NULL, which the
     // receipt reports as unavailable-with-a-reason and never as zero.

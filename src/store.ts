@@ -3,7 +3,8 @@ import { createRequire } from 'node:module';
 import type { DatabaseSync as DatabaseSyncType, StatementSync } from 'node:sqlite';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { AgentId, Incident, IncidentOrigin, IntegrityRecord, NormalizedEvent } from './types.js';
+import type { AgentId, CanonicalTool, EventKind, Incident, IncidentOrigin, IntegrityRecord,
+  NormalizedEvent, ReplayableAction } from './types.js';
 import { dbPath, ensureHome } from './paths.js';
 import { mkdirpSafe, sha256 } from './util.js';
 
@@ -24,7 +25,116 @@ function loadSqlite(): SqliteModule {
   return sqlite;
 }
 
-const SCHEMA_VERSION = 3;
+/**
+ * Where a replay input came from. `unavailable` is a FAILURE that is counted, not a row that
+ * quietly disappears - CLAUDE.md §4.4: "a control whose state could not be checked is reported
+ * as UNVERIFIED and counted against the total".
+ */
+export type ReplayProvenance = 'stored' | 'recovered' | 'unavailable';
+
+export interface ReplayRow {
+  id: number;
+  sessionId: string;
+  agent: AgentId;
+  ts: number;
+  layer: number;
+  severity: string;
+  /** What usewarden DID: 'block' | 'warn' | ... */
+  action: string;
+  rule: string;
+  title: string;
+  /** The lossy display rendering. Kept so a reader can see what the card said. */
+  attempted: string;
+  reason: string;
+  tool: string;
+  target: string;
+  cwd: string;
+  origin: IncidentOrigin;
+  provenance: ReplayProvenance;
+  /** Why the input is unavailable, when it is. Empty otherwise. */
+  unavailableReason?: string;
+  replayable?: ReplayableAction;
+}
+
+const CANONICAL_TOOLS = new Set<string>([
+  'bash', 'read', 'write', 'edit', 'glob', 'grep', 'web', 'mcp', 'task', 'other',
+]);
+
+/**
+ * Builds one ReplayRow, preferring the stored action and falling back to the events join.
+ *
+ * The fallback has to decide whether `events.target` is a COMMAND or a PATH, because the event
+ * row stores them in one column (`filePath ?? command`). The canonical tool name answers it:
+ * `bash` means the string is a command, anything else means it is a path. That is the same
+ * question `pipeline.ts` answered when it wrote the column, read back the same way round.
+ */
+function toReplayRow(r: Record<string, unknown>): ReplayRow {
+  const base = {
+    id: Number(r['id']),
+    sessionId: String(r['sessionId'] ?? ''),
+    agent: String(r['agent'] ?? '') as AgentId,
+    ts: Number(r['ts']),
+    layer: Number(r['layer']),
+    severity: String(r['severity'] ?? ''),
+    action: String(r['action'] ?? ''),
+    rule: String(r['rule'] ?? ''),
+    title: String(r['title'] ?? ''),
+    attempted: String(r['attempted'] ?? ''),
+    reason: String(r['reason'] ?? ''),
+    tool: String(r['tool'] ?? ''),
+    target: String(r['target'] ?? ''),
+    cwd: String(r['cwd'] ?? ''),
+    origin: String(r['origin'] ?? 'fixture') as IncidentOrigin,
+  };
+
+  const json = r['actionJson'];
+  if (typeof json === 'string' && json !== '') {
+    try {
+      const parsed = JSON.parse(json) as ReplayableAction;
+      return { ...base, provenance: 'stored', replayable: parsed };
+    } catch {
+      // A corrupt blob is UNAVAILABLE, never a silent fall-through to the lossy path. A replay
+      // that quietly downgraded its own input would report a precision figure it could not
+      // support.
+      return { ...base, provenance: 'unavailable', unavailableReason: 'action_json is not valid JSON' };
+    }
+  }
+
+  const n = Number(r['eventCount'] ?? 0);
+  if (n === 0) {
+    return {
+      ...base,
+      provenance: 'unavailable',
+      unavailableReason: 'pre-v4 incident with no event row at the same (session, timestamp)',
+    };
+  }
+  if (n > 1) {
+    return {
+      ...base,
+      provenance: 'unavailable',
+      unavailableReason: `ambiguous recovery: ${n} events share this (session, timestamp)`,
+    };
+  }
+
+  const target = String(r['eventTarget'] ?? '');
+  const rawTool = r['eventRawTool'] == null ? undefined : String(r['eventRawTool']);
+  const toolRaw = r['eventTool'] == null ? undefined : String(r['eventTool']);
+  const tool = toolRaw && CANONICAL_TOOLS.has(toolRaw) ? (toolRaw as CanonicalTool) : undefined;
+  const kind = String(r['eventKind'] ?? 'pre_tool') as EventKind;
+  const cwd = String(r['eventCwd'] ?? base.cwd);
+
+  const act: ReplayableAction = {
+    agent: base.agent,
+    event: kind,
+    cwd,
+    ...(tool ? { tool } : {}),
+    ...(rawTool ? { rawTool } : {}),
+    ...(tool === 'bash' ? { command: target } : target !== '' ? { filePath: target } : {}),
+  };
+  return { ...base, provenance: 'recovered', replayable: act };
+}
+
+const SCHEMA_VERSION = 4;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -68,6 +178,7 @@ CREATE TABLE IF NOT EXISTS incidents (
   rule        TEXT NOT NULL,
   title       TEXT NOT NULL,
   attempted   TEXT NOT NULL,
+  action_json TEXT,
   reason      TEXT NOT NULL,
   tool        TEXT NOT NULL,
   target      TEXT NOT NULL,
@@ -127,6 +238,9 @@ export class Store {
   readonly db: DatabaseSyncType;
   readonly file: string;
   private cache = new Map<string, StatementSync>();
+
+  /** The database this store is reading. Reported by `usewarden replay` so a run says what it read. */
+  get path(): string { return this.file; }
 
   constructor(file?: string) {
     this.file = file ?? dbPath();
@@ -218,6 +332,26 @@ export class Store {
       // index, so history is preserved rather than being collapsed by a hash it never had.
       this.db.exec(`ALTER TABLE incidents ADD COLUMN dedupe_hash TEXT`);
     }
+
+    /**
+     * v3 -> v4 stores THE ACTION AS IT WAS, so an incident can be re-run against a ruleset it
+     * predates. `incidents.attempted` is a display rendering — one-lined and cut at 200
+     * characters — and 62 of the 92 real blocks on this machine hit that cut. A record that
+     * cannot be replayed can tell you what happened and cannot tell you whether your fix worked.
+     *
+     * IT IS ADDED NULL AND IT IS NOT BACKFILLED. A pre-v4 row genuinely does not carry its own
+     * replay input, and inventing one from the truncated display string would manufacture a
+     * command the agent never ran — which is worse than an honest gap, because every precision
+     * number computed downstream would then rest on fabricated input.
+     *
+     * Pre-v4 rows are not lost, though, and that is a correction to D-258 rather than a
+     * backfill: `events.target` has always held `filePath ?? command` verbatim, untruncated,
+     * newlines intact. `replayInputFor()` joins to it at READ time and labels the provenance of
+     * every row it returns. Nothing is written back. See D-277.
+     */
+    if (!has('incidents', 'action_json')) {
+      this.db.exec(`ALTER TABLE incidents ADD COLUMN action_json TEXT`);
+    }
   }
 
   private q(sql: string): StatementSync {
@@ -272,6 +406,21 @@ export class Store {
       ? this.q('SELECT COUNT(*) AS c FROM events').get() as { c: number }
       : this.q('SELECT COUNT(*) AS c FROM events WHERE origin=?').get(origin) as { c: number };
     return Number(r.c);
+  }
+
+  /**
+   * How many events each agent has actually delivered, and when the last one arrived.
+   *
+   * This is the only evidence usewarden has that a registered hook is EXECUTING rather than
+   * merely written down. Every other check in `status` and `doctor` reads a config file, and
+   * "the config contains my entries" is a different question from "anything ever ran" - which is
+   * the whole subject of writeups/01-hook-not-running. Answering it needs no new bookkeeping:
+   * the events table has carried `agent` and `ts` since the first schema.
+   */
+  eventStatsByAgent(): Map<string, { count: number; lastTs: number }> {
+    const rows = this.q('SELECT agent, COUNT(*) AS c, MAX(ts) AS last FROM events GROUP BY agent')
+      .all() as { agent: string; c: number; last: number }[];
+    return new Map(rows.map((r) => [r.agent, { count: Number(r.c), lastTs: Number(r.last) }]));
   }
 
   // ---- events ----------------------------------------------------------
@@ -333,12 +482,14 @@ export class Store {
   addIncident(i: Incident, live: boolean, origin?: IncidentOrigin): number {
     const org: IncidentOrigin = origin ?? (live ? 'live' : 'fixture');
     const hash = incidentDedupeHash(i, org);
+    // Serialised verbatim. No redaction, no truncation, no one-lining - see Incident.replayable.
+    const actionJson = i.replayable ? JSON.stringify(i.replayable) : null;
     const r = this.q(`INSERT INTO incidents
-      (session_id,agent,ts,layer,severity,action,rule,title,attempted,reason,tool,target,cwd,live,origin,dedupe_hash)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      (session_id,agent,ts,layer,severity,action,rule,title,attempted,action_json,reason,tool,target,cwd,live,origin,dedupe_hash)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(dedupe_hash) DO NOTHING`)
       .run(i.sessionId, i.agent, i.ts, i.layer, i.severity, i.action, i.rule, i.title,
-           i.attempted, i.reason, i.tool, i.target, i.cwd, live ? 1 : 0, org, hash);
+           i.attempted, actionJson, i.reason, i.tool, i.target, i.cwd, live ? 1 : 0, org, hash);
     if (Number(r.changes) === 0) {
       const existing = this.q('SELECT id FROM incidents WHERE dedupe_hash=?').get(hash) as { id: number } | undefined;
       return Number(existing?.id ?? 0);
@@ -375,6 +526,51 @@ export class Store {
                           attempted,reason,tool,target,cwd,live,origin
                    FROM incidents WHERE id=?`).get(id) as never;
   }
+  /**
+   * THE REPLAY CORPUS: every stored incident, with the action that produced it and an honest
+   * label saying where that action came from.
+   *
+   * Three provenances, and the distinction is the whole point of this method:
+   *
+   *   `stored`     the v4 `action_json` column. The action exactly as the agent sent it.
+   *   `recovered`  reconstructed from the sibling `events` row. `events.target` has always held
+   *                `filePath ?? command` VERBATIM - untruncated, newlines intact - and every
+   *                incident is written in the same pipeline pass as its event, so the two share
+   *                a session id and a millisecond timestamp. This is a READ-time join. Nothing
+   *                is written back, and `incidents.attempted` is never overwritten.
+   *   `unavailable` no v4 column and no joinable event. Reported as UNREPLAYABLE and counted
+   *                against the total, never silently dropped and never guessed at.
+   *
+   * D-258 recorded that 34 of 35 incidents were unreplayable and that "restoring the truncated
+   * tail is not" possible. That conclusion was drawn from `incidents.attempted` alone. It is
+   * wrong: the untruncated text was in the events table the whole time. See D-277.
+   *
+   * The join is on (session_id, ts) and is verified rather than assumed - a timestamp collision
+   * within one session would make the recovery ambiguous, so a row that matches more than one
+   * event is returned as `unavailable` rather than as an arbitrary pick.
+   */
+  replayCorpus(origin?: IncidentOrigin): ReplayRow[] {
+    const where = origin ? 'WHERE i.origin=?' : '';
+    const sql = `SELECT i.id, i.session_id AS sessionId, i.agent, i.ts, i.layer, i.severity,
+                        i.action, i.rule, i.title, i.attempted, i.reason, i.tool, i.target,
+                        i.cwd, i.origin, i.action_json AS actionJson,
+                        (SELECT COUNT(*) FROM events e
+                          WHERE e.session_id=i.session_id AND e.ts=i.ts) AS eventCount,
+                        (SELECT e.target FROM events e
+                          WHERE e.session_id=i.session_id AND e.ts=i.ts LIMIT 1) AS eventTarget,
+                        (SELECT e.tool FROM events e
+                          WHERE e.session_id=i.session_id AND e.ts=i.ts LIMIT 1) AS eventTool,
+                        (SELECT e.raw_tool FROM events e
+                          WHERE e.session_id=i.session_id AND e.ts=i.ts LIMIT 1) AS eventRawTool,
+                        (SELECT e.event FROM events e
+                          WHERE e.session_id=i.session_id AND e.ts=i.ts LIMIT 1) AS eventKind,
+                        (SELECT e.cwd FROM events e
+                          WHERE e.session_id=i.session_id AND e.ts=i.ts LIMIT 1) AS eventCwd
+                 FROM incidents i ${where} ORDER BY i.ts ASC, i.id ASC`;
+    const rows = (origin ? this.q(sql).all(origin) : this.q(sql).all()) as Record<string, unknown>[];
+    return rows.map((r) => toReplayRow(r));
+  }
+
   countIncidents(): number {
     const r = this.q('SELECT COUNT(*) AS c FROM incidents').get() as { c: number };
     return Number(r.c);

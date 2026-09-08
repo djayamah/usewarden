@@ -1,0 +1,11 @@
+Snapshot written and verified in 53 ms.
+
+File             ~/dev/warden/corpus-backup/usewarden-corpus-2026-08-26T10-47-40Z.db
+Size             6.93 MB
+SHA-256          641777589807fde08bd6e34a6fc220928d1aae107b56278ac329f218bf6e04ab
+Sessions         22
+Events           5797
+Incidents        62 (58 from real sessions)
+integrity_check  ok
+Nothing pruned.
+This is a database, not a dump. Open it with: USEWARDEN_HOME=<dir> usewarden week 3650
