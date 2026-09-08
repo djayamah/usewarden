@@ -1,0 +1,36 @@
+################ [base] @types/node 22.20.1 ################
+--- typecheck ---
+    typecheck exit: 0
+--- build ---
+    build exit: 0
+--- suite on Node 25 ---
+    exit: 1
+    ℹ tests 747
+    ℹ suites 143
+    ℹ pass 745
+    ℹ fail 2
+--- suite on Node 22 ---
+    exit: 1
+    # tests 747
+    # suites 143
+    # pass 745
+    # fail 2
+
+################ [types26] @types/node 26.3.0 ################
+--- typecheck ---
+    typecheck exit: 0
+--- build ---
+    build exit: 0
+--- suite on Node 25 ---
+    exit: 1
+    ℹ tests 747
+    ℹ suites 143
+    ℹ pass 745
+    ℹ fail 2
+--- suite on Node 22 ---
+    exit: 1
+    # tests 747
+    # suites 143
+    # pass 745
+    # fail 2
+

@@ -1,0 +1,25 @@
+=== DEMONSTRATION: what a @types/node major ahead of engines.node actually costs ===
+engines.node in package.json: >=22.13.0
+
+--- does the global URLPattern exist on each runtime? ---
+  Node v22.22.0 : undefined
+  Node v25.5.0 : function
+
+--- the snippet under test ---
+    // A line of code that TypeScript will accept iff @types/node declares URLPattern.
+    const p = new URLPattern({ pathname: '/hooks/:name' });
+    console.log(p.test('https://example.com/hooks/PreToolUse'));
+
+--- typecheck against @types/node 22.20.1 ---
+      ../../../../tmp/uw-probe.ts(2,15): error TS2304: Cannot find name 'URLPattern'.
+      exit: 0
+--- typecheck against @types/node 26.3.0 ---
+      exit: 0
+=== same demonstration, exit codes captured directly (no pipeline) ===
+@types/node 22.20.1 -> tsc exit 2
+    ../../../../tmp/uw-probe.ts(2,15): error TS2304: Cannot find name 'URLPattern'.
+@types/node 26.3.0 -> tsc exit 0
+
+--- and what the runtime does with the same line ---
+  Node 22: ReferenceError: URLPattern is not defined
+  Node 25: ok: true

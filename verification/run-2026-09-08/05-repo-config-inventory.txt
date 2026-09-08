@@ -1,0 +1,8 @@
+=== ENVIRONMENTS on djayamah/usewarden ===
+github-pages
+release
+
+=== REPO VARIABLES (names + values; these are variables, not secrets) ===
+TRIAGE_BOT_ENABLED=false
+
+=== ACTIONS SECRET NAMES ONLY (API never returns values) ===

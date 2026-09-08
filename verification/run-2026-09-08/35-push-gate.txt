@@ -1,0 +1,22 @@
+PASS   published-HEAD scan: live public tree clean, and the scan self-tested first
+
+--- condition 3: fast-forward only ---
+PASS   HEAD does not contain public/main - fine for a FEATURE branch; a push to main would be refused by the hook
+
+--- condition 4: verify-all.sh on the tree being pushed ---
+       3005ff3 is not the checkout - building and testing it in its own worktree
+PASS   the ref's own suite: 526 tests, 0 failures, built from a clean worktree
+PASS   the private tree this content came from is verify-all green (8d117fce8c)
+
+=== GATE OPEN - receipt written for 3005ff3014 ===
+
+Push. The hook will re-check the scans and the fast-forward itself:
+
+    git push public <branch>
+
+THEN, and this is condition 1's second half and condition 2:
+
+    ./scripts/read-back-public.sh
+
+Do not treat the push as done until that comes back clean. "It merged" and "the right thing
+is now live" are different sentences, which is the whole reason condition 2 exists.

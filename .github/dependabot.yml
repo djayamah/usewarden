@@ -6,6 +6,20 @@
 # The `cooldown` mirrors the `min-release-age=7` in .npmrc. A dependency update that npm would
 # refuse to install is not one Dependabot should be opening a PR for, and the 2026 worms were
 # all detected and pulled within hours - a week's delay would have caught every one of them.
+#
+# EVERY LABEL NAMED HERE MUST EXIST. GitHub's behaviour when it does not is to ignore it
+# silently ("If any of these labels is not defined in the repository, it is ignored" -
+# docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference,
+# read 2026-09-08), which is how four unlabelled Dependabot PRs sat open for three weeks with
+# nothing anywhere saying why. `scripts/check-config-references.mjs` is the gate; it runs in
+# CI and in ./scripts/verify-all.sh, so this comment is a description of a check and not the
+# check itself.
+#
+# THERE IS NO `reviewers:` KEY, AND THAT IS DELIBERATE. It used to be here. GitHub retired the
+# option on 2025-08-08 in favour of code owners
+# (github.blog/changelog/2025-08-08-dependabot-reviewers-configuration-option-is-replaced-by-code-owners),
+# so it had been doing nothing for a year. .github/CODEOWNERS already assigns `* @djayamah`,
+# which covers Dependabot's PRs and everyone else's. Do not add it back.
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -20,8 +34,55 @@ updates:
     labels:
       - "dependencies"
     # Any new dependency needs a row in docs/DEPENDENCY-BUDGET.md before it is merged.
-    reviewers:
-      - "djayamah"
+
+    ignore:
+      # @types/node IS PINNED TO THE MAJOR THAT MATCHES `engines.node`, AND THAT IS THE POINT.
+      #
+      # package.json declares `engines.node: >=22.13.0`, so users install this on Node 22. The
+      # @types/node major tracks a Node major: version 26 describes Node 26's API surface. Raising
+      # it does not break the build - PR #31 was checked and typecheck, build and the full suite
+      # were byte-identical on Node 22 and Node 25 - it removes a check that currently works.
+      #
+      # Measured on 2026-09-08 (verification/run-2026-09-08/13-types-ahead-of-engines-demo.txt):
+      #
+      #   const p = new URLPattern({ pathname: '/hooks/:name' });
+      #
+      #   @types/node 22.20.1  tsc exit 2  error TS2304: Cannot find name 'URLPattern'
+      #   @types/node 26.3.0   tsc exit 0
+      #   Node v22.22.0        ReferenceError: URLPattern is not defined
+      #   Node v25.5.0         ok
+      #
+      # On @types/node 22 the typechecker refuses code that cannot run on our own floor. On 26 it
+      # accepts it, and the mistake surfaces as a runtime crash for a user on Active LTS. The CI
+      # matrix would only catch it on a line a test actually exercises. Trading a compile-time
+      # guarantee for a test-coverage-dependent one is the wrong direction for this repository.
+      #
+      # WHEN TO LIFT THIS: when `engines.node` itself moves off 22 - not before, and change both
+      # in the same commit. Node 22 reaches end-of-life 2027-04-30. Minor and patch updates
+      # inside the 22 line still come through; only the major jump is held.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+
+      # typescript 7 IS SAFE AND BUYS NOTHING, WHICH IS NOT THE SAME AS BEING FREE.
+      #
+      # PR #1 (5.9.3 -> 7.0.2) was measured on 2026-09-08, not eyeballed. Typecheck, build and the
+      # full suite were identical on Node 22.22.0 and 25.5.0, and - the number that decides it -
+      # the EMITTED JAVASCRIPT was byte-identical across all 39 files in dist/src. Nothing that
+      # ships changes. No install script appears anywhere in the new tree.
+      #
+      # What it costs is the lockfile: 4 entries -> 24, the twenty new ones being prebuilt
+      # `@typescript/typescript-<platform>` native binaries. This project chose `node:sqlite` over
+      # `better-sqlite3` specifically to keep native binaries out of the tree, and
+      # docs/DEPENDENCY-BUDGET.md requires downloads, publish date, maintainer count, transitive
+      # count and an install-script check per added package. Twenty packages for an identical
+      # build output does not clear that bar today.
+      #
+      # WHEN TO LIFT THIS - either is sufficient, and neither is far off:
+      #   * TypeScript 5.x stops receiving fixes, or
+      #   * something this repository actually needs requires the 7 line.
+      # Review by 2027-03-01 regardless. Minor and patch updates inside 5.x still come through.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

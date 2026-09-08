@@ -1,0 +1,9 @@
+=== CREATE the 'adapter' label the issue template names ===
+{"message":"Validation Failed","errors":[{"resource":"Label","code":"custom","field":"description","message":"description is too long (maximum is 100 characters)"}],"documentation_url":"https://docs.github.com/rest/issues/labels#create-a-label","status":"422"}gh: Validation Failed (HTTP 422)
+
+--- read back, separately ---
+{"message":"Not Found","documentation_url":"https://docs.github.com/rest/issues/labels#get-a-label","status":"404"}gh: Not Found (HTTP 404)
+=== retry with a description inside GitHub's 100-char limit ===
+{"id":12099686917,"node_id":"LA_kwDOT9uSX88AAAAC0TKSBQ","url":"https://api.github.com/repos/djayamah/usewarden/labels/adapter","name":"adapter","color":"5319e7","default":false,"description":"Support for an AI coding agent: one src/adapters/ entry plus a docs/HOOK-MATRIX.md row."}
+--- read back, separately ---
+{"color":"5319e7","description":"Support for an AI coding agent: one src/adapters/ entry plus a docs/HOOK-MATRIX.md row.","name":"adapter"}

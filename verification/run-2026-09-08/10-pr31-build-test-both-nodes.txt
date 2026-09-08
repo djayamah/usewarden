@@ -1,0 +1,15 @@
+=== BUILD + TEST with @types/node 26.3.0 ===
+--- typecheck ---
+typecheck exit: 0
+--- build ---
+build exit: 0
+
+--- test suite on NODE 25 (v25.5.0) ---
+node25 suite exit: 
+
+--- test suite on NODE 22 (v22.22.0) ---
+# tests 689
+# suites 143
+# pass 616
+# fail 73
+node22 suite exit: 

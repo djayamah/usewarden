@@ -1,0 +1,9 @@
+=== CLOSE PR #31 (no comment posted; reason recorded in docs/DEPENDENCY-BUDGET.md and dependabot.yml) ===
+2026-09-07T23:46:57Z
+{"number":31,"state":"closed","title":"deps: bump @types/node from 22.20.1 to 26.3.0"}
+
+--- read back from the API, separately ---
+{"closed_at":"2026-09-07T23:46:57Z","merged":false,"number":31,"state":"closed","title":"deps: bump @types/node from 22.20.1 to 26.3.0"}
+
+--- confirm NO comment was added by this run ---
+comments on PR #31: 1

@@ -1,0 +1,16 @@
+=== RESTORE after sabotage ===
+dependencies
+--- read back ---
+{"color":"0366d6","description":"Dependency or GitHub Actions version bump. Applied by Dependabot per .github/dependabot.yml.","name":"dependencies"}
+
+--- re-apply to the open Dependabot PRs (deleting a label strips it from its issues) ---
+  PR #1 labels now: dependencies
+  PR #25 labels now: dependencies
+  PR #26 labels now: dependencies
+  PR #31 labels now: dependencies
+
+--- check must be green again ---
+  checked against djayamah/usewarden: 15 labels, 2 environments
+
+PASS  every label, environment, actor and team named in .github/ exists in djayamah/usewarden
+EXIT: 

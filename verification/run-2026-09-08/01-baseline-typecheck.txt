@@ -1,0 +1,11 @@
+=== BASELINE 2026-09-07T23:34:05Z ===
+--- node 25 ---
+v25.5.0
+--- @types/node installed ---
+    "version": "22.20.1",
+--- typecheck ---
+
+> usewarden@0.1.1 typecheck
+> tsc -p tsconfig.json --noEmit
+
+typecheck exit: 0

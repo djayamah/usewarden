@@ -106,6 +106,13 @@ jobs:
   scan:
     name: Secret and identity pattern scan
     runs-on: ubuntu-latest
+    # `issues: read` is here for ONE step: the config reference check needs to list this
+    # repository's labels, and the labels endpoint is part of the issues scope. Without it the
+    # check can only ever report UNVERIFIED, and a gate whose answer never changes is a gate
+    # nobody reads. Read-only, and the narrowest scope that makes the check real.
+    permissions:
+      contents: read
+      issues: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -132,6 +139,27 @@ jobs:
       # only when present — the rehearsal reports honestly when it is absent.
       - name: No credential anywhere in the working tree
         run: ./scripts/pre-public-scan.sh --scope=tree --classes=credentials
+
+      # Does every label, environment, reviewer and team our configuration names actually exist?
+      # `.github/dependabot.yml` named a label that did not, GitHub ignored it silently, and four
+      # pull requests sat unlabelled for three weeks. Only the offline half runs here by default:
+      # the existence half needs a token that can read labels and environments, and GITHUB_TOKEN
+      # in a pull_request from a fork does not have it. Exit 3 is UNVERIFIED, not a pass, and the
+      # full check runs in ./scripts/verify-all.sh before anything is pushed.
+      - name: Config references — every named repo object exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # `if node ...; then` and NOT `node ...; rc=$?`. Actions runs `bash -e`, so a non-zero exit
+        # kills the step on the command itself and `rc=$?` is never reached - the exit-3 branch
+        # below could not run, and the first public CI run went red on an UNVERIFIED it was
+        # written to tolerate. A condition is the one context where `-e` does not fire.
+        run: |
+          if node scripts/check-config-references.mjs; then rc=0; else rc=$?; fi
+          if [ "$rc" -eq 3 ]; then
+            echo "::warning::config reference check: some references were UNVERIFIED - this token could not read their class"
+            exit 0
+          fi
+          exit "$rc"
 
       - name: Publication rehearsal — scan what publication would actually push
         env:

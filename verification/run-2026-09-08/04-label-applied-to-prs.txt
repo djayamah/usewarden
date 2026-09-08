@@ -1,0 +1,15 @@
+=== APPLY LABEL TO OPEN DEPENDABOT PRs 2026-09-07T23:34:38Z ===
+--- PR #1 ---
+dependencies
+--- PR #25 ---
+dependencies
+--- PR #26 ---
+dependencies
+--- PR #31 ---
+dependencies
+
+=== READ BACK (separate GET per PR) ===
+PR #1 labels: dependencies
+PR #25 labels: dependencies
+PR #26 labels: dependencies
+PR #31 labels: dependencies

@@ -1,0 +1,28 @@
+=== the UNVERIFIED path, exercised rather than assumed ===
+--- a repo this token cannot read: every class should be UNVERIFIED, exit 3 ---
+FAIL  .github/CODEOWNERS:12  @djayamah is not a collaborator on djayamah/definitely-not-a-real-repo-xyz — naming them assigns nobody
+FAIL  .github/CODEOWNERS:13  @djayamah is not a collaborator on djayamah/definitely-not-a-real-repo-xyz — naming them assigns nobody
+FAIL  .github/CODEOWNERS:14  @djayamah is not a collaborator on djayamah/definitely-not-a-real-repo-xyz — naming them assigns nobody
+FAIL  .github/CODEOWNERS:15  @djayamah is not a collaborator on djayamah/definitely-not-a-real-repo-xyz — naming them assigns nobody
+FAIL  .github/CODEOWNERS:16  @djayamah is not a collaborator on djayamah/definitely-not-a-real-repo-xyz — naming them assigns nobody
+
+A configuration that names something absent is not a configuration that is off.
+It is one that reads as on and enforces nothing.
+
+--- and the CI shell logic under bash -e, both branches ---
+  script exit 3 -> step exits 0 (warning)
+    step exit code: 0
+    step exit code: 1
+    step exit code: 0
+=== a repo that does not exist is now UNVERIFIED, not five confident findings ===
+  scanned 6 file(s), found 15 reference(s)
+
+UNVERIFIED  cannot read djayamah/definitely-not-a-real-repo-xyz itself (gh: Not Found (HTTP 404)) - nothing about its contents can be checked
+            The static checks above ran; existence of labels, environments and
+            actors was NOT checked. This is not a pass (CLAUDE.md §4.4).
+EXIT: 0
+
+=== and the real repo still passes ===
+
+PASS  every label, environment, actor and team named in .github/ exists in djayamah/usewarden
+EXIT: 0

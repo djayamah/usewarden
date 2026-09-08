@@ -1,0 +1,18 @@
+=== READ BACK LABEL FROM API 2026-09-07T23:34:17Z ===
+--- direct GET of the label ---
+{"id":12099640268,"node_id":"LA_kwDOT9uSX88AAAAC0THbzA","url":"https://api.github.com/repos/djayamah/usewarden/labels/dependencies","name":"dependencies","color":"0366d6","default":false,"description":"Dependency or GitHub Actions version bump. Applied by Dependabot per .github/dependabot.yml."}
+--- full label list, re-fetched ---
+accessibility
+agent:claude
+bug
+dependencies
+docs-gap
+documentation
+duplicate
+enhancement
+good first issue
+help wanted
+invalid
+question
+unmatched
+wontfix
