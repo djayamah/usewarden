@@ -1,0 +1,15 @@
+REPLAY: the historic corpus IS recoverable — D-258's premise corrected
+Generated: 2026-09-08T06:55:04Z
+
+D-258 (2026-08-26) concluded: 34 of 35 incidents UNREPLAYABLE, 'restoring the truncated
+tail is not' possible. That was measured from incidents.attempted alone.
+
+incidents.attempted IS a display rendering, and IS truncated. Both true:
+  live incidents                      : 103
+  live blocks                         : 92
+  whose attempted hit the 200-char cut: 62
+
+BUT events.target has always held filePath ?? command, VERBATIM:
+  longest events.target               : 20026 chars (vs the 200-char incident cut)
+  events whose target has real newlines: 3558
+  live incidents joining EXACTLY ONE event on (session_id, ts): 103 of 103

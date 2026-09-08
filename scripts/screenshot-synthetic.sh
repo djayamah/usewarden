@@ -22,13 +22,14 @@ SRC="${1:-$REPO/.usewarden-live}"
 [ -d "$SRC" ] || { echo "no captured state at $SRC" >&2; exit 1; }
 
 # Resolve the browser against the REAL home before HOME is replaced.
-for c in \
-  "$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/chrome-headless-shell" \
-  "$(command -v chrome-headless-shell || true)" \
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; do
-  [ -n "$c" ] && [ -x "$c" ] && { export SHELL_BIN="$c"; break; }
-done
-[ -n "${SHELL_BIN:-}" ] || { echo "FAIL: no headless browser found" >&2; exit 1; }
+#
+# THE REPO-LOCAL BROWSER IS TRIED FIRST, AND A FORBIDDEN RESOLUTION IS REFUSED. This script had its
+# OWN copy of the candidate list, so fencing `screenshot.sh` alone left this one still reaching into
+# `~/Documents/REDACTED-video/` through a symlink (D-234). Two copies of a path list, one of them
+# fixed, is the drift `scripts/internal-only-paths.txt` exists to prevent - and it happened again
+# here, in the same run, to the same list.
+. "$REPO/scripts/resolve-browser.sh"
+usewarden_resolve_browser "$REPO" || exit 1
 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT

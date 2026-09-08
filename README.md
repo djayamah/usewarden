@@ -5,7 +5,9 @@
 One local guardrail for Claude Code, Cursor, Gemini CLI, Copilot CLI, Codex and OpenCode. It
 blocks writes outside the repo you're in, `.env` reads, `rm -rf` above the project root, force
 pushes to `main`, and `curl | sh` — deterministically, in under a millisecond, with **no API key
-and no tokens**.
+and no tokens**. Since 0.1.2 those blocks hold when the command is wrapped, too: `sh -c '…'`,
+`env`, `timeout`, `nohup`, `xargs`, `find -exec` and 49 other forms are recognised rather than
+resolved away. Earlier versions did not — [`SECURITY.md`](SECURITY.md) says which and why.
 
 > ### Free. Local. No account.
 >
@@ -31,6 +33,33 @@ and no tokens**.
 *Real output from a real `claude --dangerously-skip-permissions` session. The agent read the
 reason, stopped, and explained itself instead of routing around the block.*
 
+### And when nothing goes wrong, you still get something
+
+A guardrail that only speaks up when it catches something is silent on almost every session — and
+"nothing happened" looks exactly like "this isn't running". So every session ends with a receipt,
+whether or not anything fired:
+
+```console
+$ usewarden last
+
+  usewarden receipt  claude  session 81ab72cc…
+
+  session     2026-08-24 11:41:44Z → 2026-08-24 11:42:00Z  (15s)
+  boundary    session-end-hook  — the agent's own session-end hook fired
+  project     ~/dev/acme-api
+  goal        "Read README.md and package.json, then tell me in two sentence…"
+
+  did         7 events · 2 files touched · 0 commands run
+  caught      0 blocked · 0 warned · 0 outside scope
+  guardian    3 judge calls · $0.0000 metered · 3 unpriced local
+
+  Nothing needed blocking this session. That is the good outcome, and this
+  receipt is the evidence it happened: 7 events were inspected against your policy.
+```
+
+Every figure is computed by query when you ask for it, never read from a counter. A field usewarden
+cannot determine says so and says why — it never prints a zero it did not measure.
+
 ## Is this your week?
 
 - **"It deleted files I never asked it to touch."** `rm -rf ~/` and its cousins are now a
@@ -50,6 +79,58 @@ reason, stopped, and explained itself instead of routing around the block.*
 
 usewarden does not make your machine safe — it is not a sandbox, and [it says so](#what-usewarden-cannot-catch).
 It raises the cost of the bad action and leaves a record you can look at.
+
+## If Claude Code is the only agent you run, read this before installing
+
+Claude Code has its own permission system, and for *blocking* it is as good as usewarden — and in
+two specific cases **better**. You should hear that from us rather than discover it.
+
+Everything in the first column below was measured against the shipped hook binary and the
+transcript is in the repository ([`verification/native-comparison/01-what-fires.txt`](verification/native-comparison/01-what-fires.txt),
+reproduce it with `node scripts/probe-native-gap.mjs`). Everything in the second is from
+Anthropic's own documentation, linked inline.
+
+| The agent tries to… | usewarden | Claude Code's own controls |
+|---|---|---|
+| `rm -rf` above the project, force-push to `main`, `sudo`, `curl \| sh` | blocks | `Bash(rm *)`, `Bash(git push --force *)` deny rules — **equal**, and blunter, which is arguably safer |
+| read a private path with `Read`/`Edit` | blocks | `Read(~/Documents/**)` deny rule — **equal** |
+| write outside the project with `Write`/`Edit` | blocks | working-directory confinement — **equal** |
+| **write outside the project by shell redirect** — `echo x > /outside` | **does not block** | **blocks.** Claude Code "checks the target of an output redirection, such as `>`, `>>`, or `2>`, as a file write" ([permissions](https://code.claude.com/docs/en/permissions#redirections)) |
+| **write outside the project from a subprocess** — `python3 -c "open('/outside','w')…"` | **does not block** | **blocks, with `/sandbox`.** The OS sandbox covers "not just Claude Code's direct interactions, but also any scripts, programs, or subprocesses that are spawned by the command" ([sandboxing](https://www.anthropic.com/engineering/claude-code-sandboxing)) |
+| read a private path with `cat`, `head`, or a Python one-liner | **does not block** (except `.env`) | **also does not block** by a path rule — `cat` and `head` are built-in read-only commands that "run without a permission prompt in every mode" ([permissions](https://code.claude.com/docs/en/permissions#read-only-commands)). Neither tool covers this; a blunt `Bash(cat *)` deny rule is the only native answer |
+
+**So: if blocking is all you want, and Claude Code is all you run, you do not need this.** Turn on
+`/sandbox`, write the deny rules, and you are covered — better covered, for out-of-scope writes,
+than usewarden can make you.
+
+### What usewarden gives you that native controls do not
+
+Three things, and they are the reason to install it:
+
+1. **A record that is still there next week.** A permission denial is a moment in a transcript you
+   will never scroll back to; the documentation describes no persistent log. usewarden writes every
+   attempt to a local database with the command, the rule and the timestamp, and `usewarden week`
+   reads it back. On this project's own machine that is **57 incidents across 22 real sessions over
+   six days**, still readable today — and the sharpest thing the record has produced so far is
+   evidence about usewarden's own accuracy: **35 of those 59 fired on text about a dangerous
+   command rather than on one being run** — an agent writing a runbook, a commit message or a test
+   fixture that named the command. No tool that only blocks can tell you that about itself.
+   And then the record ran into its own limit, which is worth stating just as plainly: asked
+   *"would these still happen on today's build?"*, it **cannot answer**. `attempted` is stored as a
+   one-line display rendering and truncated, so 34 of the 35 commands no longer parse — the
+   heredoc terminator is gone. Exactly one is short enough to replay, and it still fires. That is a
+   real limitation of this record and it is named in
+   [`docs/RETENTION.md`](docs/RETENTION.md) as the next thing worth building.
+   Run it yourself: `node scripts/classify-incidents.mjs`.
+2. **One policy across six agents.** Deny rules are Claude Code's. Cursor, Gemini CLI, Copilot CLI,
+   Codex and OpenCode each have their own model, or none. `usewarden init` writes one policy to all
+   of them.
+3. **Drift.** Comparing what the agent is *doing* against the goal it was *given* is not something
+   a path allowlist can express, and there is no native equivalent. Four of those 57 real incidents
+   were drift warnings.
+
+The honest one-line pitch is therefore **not** "we block things Claude Code cannot". It is: *we are
+the only thing that remembers, and the only policy your five other agents share.*
 
 ## Quickstart
 
@@ -102,7 +183,7 @@ redacted and length-capped first.
 
 **Do I need an API key?**
 No. **Layer 1 — the blocking — needs no key and costs nothing.** It is deterministic pattern and
-scope matching: zero tokens, every event, and it catches 15 of the 17 scenarios in the project's
+scope matching: zero tokens, every event, and it catches 14 of the 17 scenarios in the project's
 own sabotage suite on its own. Layer 2, the semantic drift judge, is optional and **you bring your
 own key**; it will also use an already-authenticated `claude` or `gemini` CLI on your PATH, which
 costs no extra money. With nothing configured at all, Layer 2 announces itself as off and Layer 1
@@ -122,12 +203,16 @@ cheapest provider you have a key for and shows you the per-call cost —
 [see below](#which-judge-usewarden-picks).
 
 **Why not just use my agent's own permissions and allowlists?**
-You should — usewarden does not replace them, and if you are only running one agent they may be
-all you need. usewarden adds three things an allowlist cannot: **one policy across six agents**
-instead of six separate configs, a **record** of what was attempted so you can look at it later,
-and a semantic layer that catches **drift away from the goal you stated**, which is not something
-a path allowlist can express. It also tells you loudly when it is not actually running, which is
-[the failure mode](#why-this-exists) this whole project is built around.
+**If Claude Code is the only agent you run, you probably should — and you should turn on
+`/sandbox` while you are there.** For blocking, native deny rules match usewarden, and for writes
+that leave the project they beat it: Claude Code checks shell redirection targets and the OS
+sandbox confines subprocesses, and usewarden does neither. That comparison is measured, in both
+directions, and set out in full [above](#if-claude-code-is-the-only-agent-you-run-read-this-before-installing).
+What usewarden adds is not more blocking. It is a **record** that is still readable next week, **one
+policy across six agents** instead of six separate configs, and a semantic layer that catches
+**drift away from the goal you stated**, which no path allowlist can express. It also tells you
+loudly when it is not actually running, which is [the failure mode](#why-this-exists) this whole
+project is built around.
 
 **How do I uninstall it, and will my agent config survive?**
 `usewarden uninstall` removes usewarden's hook entries from every agent config it registered with.
@@ -160,7 +245,8 @@ than guessing.
 Yes, and it has — it blocked this project's own author twice in one day: once for writing a release
 runbook whose text contained the words `npm publish`, and once for a security test fixture that
 contained a dangerous command as test data. Both times it mistook a description of a command for the
-command. That class is fixed; the general problem does not go away.
+command. The heredoc form of that is fixed; the same text as a quoted shell argument is not, and
+says so below.
 [docs/FALSE-POSITIVES.md](docs/FALSE-POSITIVES.md) is the honest account — what to do when it
 happens to you, what we will not do about it, and the one gap still open. Worth two minutes before
 you install rather than after.
@@ -446,6 +532,33 @@ Stated plainly, because a security tool that oversells is worse than none.
 
 - **Usewarden is not a sandbox.** It cannot stop an agent from doing something your policy does not
   name. It reduces blast radius; it does not contain a determined process.
+- **A shell redirect out of the project is not blocked.** `echo x > /somewhere/outside` is allowed,
+  and so are `>>` and `2>`. Matching `>` would fire on every legitimate redirect anyone runs, and a
+  rule nobody can live with is a rule that gets switched off — the reasoning is in
+  [`docs/FALSE-POSITIVES.md`](docs/FALSE-POSITIVES.md). **Claude Code does check redirection
+  targets, so this is a case where its own controls are better than ours**; see
+  [the comparison](#if-claude-code-is-the-only-agent-you-run-read-this-before-installing).
+- **A subprocess that opens a file itself is invisible.** `python3 -c "open('/outside','w')…"` is a
+  Bash command whose *declared* text names no path usewarden can resolve, so nothing fires. No hook
+  can see this; only an OS sandbox can, which is what Claude Code's `/sandbox` is for.
+- **`forbidden_paths` guards the agent's file tools, not the shell.** `Read`, `Edit` and `Write` are
+  checked against it ([`src/engine/layer1.ts:79`](src/engine/layer1.ts)) because those events carry a
+  file path. A Bash command carries a command string instead, so `cat ~/private/notes` is not
+  matched. **`.env` is the exception**: a separate structural check blocks any unrecognised command
+  that names a `.env` file ([`src/engine/layer1.ts:221`](src/engine/layer1.ts)), which exists because
+  a real session reached one with `sed`. Everything else on your forbidden list is protected against
+  the file tools only.
+- **That includes usewarden's own policy file — and this happened, on the author's machine.** On
+  2026-08-29 an agent was refused a `Write` to `~/.usewarden/usewarden.yaml`, twice, and both
+  refusals are in the record. It then made the same edit with `sed -i` from Bash, which the bullet
+  above says is allowed and which is what happened. `~/Documents` came out of `forbidden_paths` and
+  two directories went into `allowed_paths`; 18 blocks that had really happened on that machine
+  would no longer have happened; and `status`, `doctor` and every integrity check stayed green for
+  ten days, because all of them watch the **agents' registrations** and none of them watched
+  usewarden's own rules. **Preventing the write is not achievable from a hook.** Noticing it is, and
+  since 0.1.2 `usewarden` seals the policy at install and every `status`, `doctor` and status line
+  reports it when the rules in force would catch less than the rules you installed — measured by
+  replaying both, not by diffing the file. `usewarden policy --drift` prints the list.
 - **Codex IDE and desktop wrappers may ignore project configuration entirely.** Usewarden registers
   Codex hooks at the user layer for that reason, and sessions inside those wrappers are **not
   covered**.
@@ -455,8 +568,11 @@ Stated plainly, because a security tool that oversells is worse than none.
 - **The Layer-2 judge fails open.** If it is unavailable, unaffordable, or unparseable, usewarden
   says so loudly and carries on with Layer 1. It will never block on a judge's say-so, and it can
   be wrong in both directions.
-- **Layer 1 catches 15 of the 17 sabotage scenarios, not all of them.** The gap is semantic drift, which is
-  exactly what Layer 2 is for — and Layer 2 is sampled, not exhaustive.
+- **Layer 1 catches 14 of the 17 sabotage scenarios, not all of them.** Two of the three misses are
+  semantic drift, which is exactly what Layer 2 is for — and Layer 2 is sampled, not exhaustive. The
+  third is the context-fill rule, which cannot fire because no agent reports the figure; it is off
+  by default for that reason and the scenario is kept as a miss rather than dropped to flatter the
+  number. See [`docs/POLICY-INPUTS.md`](docs/POLICY-INPUTS.md).
 - **A hook that is not registered does not fire.** That is why `usewarden status` says
   **UNPROTECTED** in red and exits non-zero, and why there is an A/B test proving the difference
   (`verification/live/08-ab-removal.txt`).
@@ -483,7 +599,7 @@ surprise is why tools get uninstalled. The full write-up is in [`docs/FALSE-POSI
 
 ### Text *about* a dangerous command can be mistaken for the command
 
-This one has bitten this project's own maintainer **five times in one day, across three syntaxes**.
+This one has bitten this project's own maintainer **six times, across three syntaxes** — most recently while writing this very section.
 The deny rules match the command string, and a command string can contain text that is data.
 
 **Fixed — heredoc bodies.** Writing a file whose contents mention a blocked command works:
@@ -525,14 +641,21 @@ machine-wide ignore list. A file ignored only there looks untracked, so a wholes
 is refused once. Stage it, or add the pattern to the repository's own `.gitignore`.
 [`docs/GIT-AWARENESS.md`](docs/GIT-AWARENESS.md) lists every limit of that rule.
 
-### There is no per-incident "allow this once"
+### When one of these hits you: `usewarden allow`
 
-Today the escape hatch is the policy file — a thirty-second edit, but not a one-keystroke one.
-Mature scanners solve this with inline suppression carrying a justification (`#nosec`, `//nolint`),
-which does not transfer directly: a usewarden finding is an agent action at a moment, not a line of
-source, so there is nowhere to put a comment. The planned shape is a human-run
-`usewarden allow <rule-id>` recording a scoped, dated, **expiring** exception outside the policy
-file, with a listing command so exceptions stay auditable. The agent will never be able to invoke it.
+```bash
+usewarden allow dotenv-access        # waive that rule, in this project, for 24 hours
+usewarden allow --list               # every waiver you hold, and when each expires
+usewarden allow --revoke dotenv-access
+```
+
+It expires after 24 hours, it is stored outside your policy file so it cannot be committed and
+become permanent, it is scoped to one rule in one project, and **your agent cannot grant it** —
+`usewarden allow` refuses unless stdin is an interactive terminal, and every supported agent runs
+shell commands through a captured pipe.
+
+A waiver changes the verdict, not the audit trail: the attempt is still recorded, the card says
+*Waived by an explicit human exception*, and it still appears on your session receipt.
 
 ---
 
@@ -542,12 +665,21 @@ file, with a listing command so exceptions stay auditable. The agent will never 
 |---|---|
 | `usewarden init [--project] [--dry-run]` | detect agents, preview the diff, register hooks |
 | `usewarden status` | protection state, counters, the 4-item checklist. Exit 1 if not protected |
+| `usewarden scan` | what would usewarden do in *this* project? Read-only, about a second |
+| `usewarden last [session-id]` | the receipt for the most recent agent session |
+| `usewarden sessions [n]` | one line per session, most recent first |
+| `usewarden week [days]` | what your agents actually did in the last 7 days — real sessions only, never demo or fixture. Exits 1 when nothing was recorded, because that means usewarden was not watching rather than that the week was quiet |
+| `usewarden backup --to DIR` | write one verified copy of the record into a directory your own backup already reaches. It is a `VACUUM INTO` snapshot rather than a file copy, because the live database is WAL-mode and a file-level copy of one can capture a state that never existed; the snapshot is integrity-checked and row-counted against the source before it is called a snapshot. `--if-older-than N` makes it a no-op when the last one is under N hours old, so it is safe to call from a git hook |
+| `usewarden allow <rule-id>` | waive one rule here for 24 hours. `--list`, `--revoke`. Humans only |
 | `usewarden demo` | four real incident cards from a temp fixture, in about a second |
 | `usewarden incidents [n]` | the incident wall |
 | `usewarden metrics` | every number usewarden reports, how it was derived, and what it refuses to estimate. Exit 1 if the figures do not add up |
 | `usewarden dashboard [port]` | local read-only dashboard on 127.0.0.1 |
 | `usewarden doctor` | why usewarden might not be firing |
 | `usewarden policy` | the effective policy and where each part came from |
+| `usewarden policy --drift` | **what your rules used to catch and no longer do.** Not a diff of the file — it replays both rulesets against the same actions and reports the difference in verdicts |
+| `usewarden reseal` | accept the policy in force as the new baseline, when you made the change yourself and meant it |
+| `usewarden replay` | re-run every stored incident against a ruleset it has never seen. `--policy FILE` to try a different one, `--labels FILE` to add precision and coverage |
 | `usewarden trust <path>` / `untrust` | let a repo's `usewarden.yaml` widen your scope |
 | `usewarden unlock [--minutes N]` / `lock` | suppress TAMPERED while you edit your own config |
 | `usewarden uninstall` | remove usewarden's hook entries |
@@ -663,7 +795,7 @@ Node **≥ 22.13.0** (Node 22 *Jod* and 24 *Krypton* are the Active LTS lines; 2
 ```bash
 npm install
 npm run build
-npm test                          # 526 tests, no network, no API keys required
+npm test                          # 833 tests, no network, no API keys required
 ./scripts/verify-all.sh           # every gate: build, both Node lines, fixtures, screenshots, CLI smoke
 ./scripts/make-fixture.sh         # build the sabotage fixture
 ./scripts/screenshot-synthetic.sh # re-render the published screenshots

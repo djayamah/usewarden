@@ -76,6 +76,19 @@ These are **documented limitations, not vulnerabilities**. They are stated in th
 
 Pre-1.0. Only the latest published version receives fixes.
 
+## Known issues in published versions
+
+Listed here rather than only in the changelog, because a user deciding whether to upgrade should
+not have to read release notes to find out that the version they have does not do what its package
+page says.
+
+| Version | Issue | Fixed in |
+|---|---|---|
+| **0.1.0, 0.1.1** | **A dangerous command hidden inside a quoted program string is not caught.** `sh -c 'rm -rf /'`, `env sh -c '…'`, `timeout 5 sh -c '…'` and 41 other wrapper forms are allowed; the bare command (`rm -rf /`) is correctly refused. The wrapper makes the payload resolve as a path inside the allowed scope, so the rule is skipped rather than evaluated. It needs no adversarial agent — 8.1% of real recorded agent commands use one of these wrapper forms as ordinary idiom. | 0.1.2 |
+| **0.1.0, 0.1.1** | **Nothing notices if usewarden's own policy is weakened.** `forbidden_paths` guards the agent's file tools and not the shell (documented), which includes `~/.usewarden/usewarden.yaml` itself. A policy narrowed by a shell command is enforced silently and `status` and `doctor` stay green. Prevention is not achievable from a hook; 0.1.2 seals the policy at install and reports weakening on `status`, `doctor` and `usewarden policy --drift`. | 0.1.2 |
+
+Both were found by this project's own testing, not reported externally.
+
 ## Usewarden's own supply chain
 
 - **No install scripts.** No `preinstall`, `install`, `postinstall`, or `prepare`, in usewarden or

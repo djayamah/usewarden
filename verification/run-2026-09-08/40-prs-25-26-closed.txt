@@ -1,0 +1,12 @@
+=== PRs #25 and #26: their change is now ON main, so they are superseded ===
+--- proof the SHAs they asked for are live on main ---
+  matching pins on main: 2
+
+--- closing #25 ---
+{"number":25,"state":"closed","title":"ci: bump actions/checkout from 5.0.0 to 7.0.1"}
+--- closing #26 ---
+{"number":26,"state":"closed","title":"ci: bump actions/setup-node from 5.0.0 to 7.0.0"}
+
+--- read back ---
+  #25 state=closed merged=false
+  #26 state=closed merged=false

@@ -1,0 +1,43 @@
+SABOTAGE: forge the frozen label set and confirm every surface refuses it
+Generated: 2026-09-08T07:44:42Z
+
+=== 1. BASELINE: the untampered set verifies and reports a number ===
+
+                        BEFORE (as recorded)    AFTER (rules under test)
+  precision             54.3%  (50/92)          90.9%  (50/55)
+  coverage              100.0%  (50/50)         100.0%  (50/50)
+  false positives       42                      5
+  unknown, still firing 0                       0
+  indeterminate         0                       0
+
+
+=== 2. THE SABOTAGE: relabel every FALSE_POSITIVE as TRUE_POSITIVE ===
+    (the exact move that would let a missed precision target be met by relabelling)
+    flipped 42 labels — precision would now read 100%
+    ASSERT THE SABOTAGE LANDED:
+      recomputed hash : e344f97b81044485c59066fd6dd66b13d23b94c14017b72a594de190f2aa112b
+      frozen hash     : b33013d1b35a764f8145367c0cc9e4f6114ae209dd9408f8ee6877324e117959
+
+=== 3. THE DEFENCE: usewarden replay ===
+replay: REFUSING this label set.
+  - label set hash e344f97b81044485… does not match the frozen b33013d1b35a764f…
+  computed e344f97b81044485c59066fd6dd66b13d23b94c14017b72a594de190f2aa112b
+  frozen   b33013d1b35a764f8145367c0cc9e4f6114ae209dd9408f8ee6877324e117959
+    exit=1
+
+=== 4. THE DEFENCE, SECOND SURFACE: usewarden metrics ===
+  usewarden metrics
+
+  VALUE — was it right?
+  precision   unavailable
+    label set REFUSED: label set hash e344f97b81044485… does not match the
+    frozen b33013d1b35a764f…
+
+
+=== 5. RESTORED, and the baseline number returns ===
+  precision             54.3%  (50/92)          90.9%  (50/55)
+  coverage              100.0%  (50/50)         100.0%  (50/50)
+  false positives       42                      5
+  unknown, still firing 0                       0
+  indeterminate         0                       0
+

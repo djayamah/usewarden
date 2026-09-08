@@ -1,0 +1,105 @@
+=== LIVE JUDGE CHECK (ops/JUDGE-LIVE-CHECK.md) ===
+run:      2026-08-20T07:33:24Z
+HEAD:     5248c92
+runner:   ./scripts/judge-live.sh   (key read from macOS Keychain, never printed or written)
+
+anthropic: UNVERIFIED-LIVE 2026-08-20   no key available on this machine
+openai:    UNVERIFIED-LIVE 2026-08-20   no key available on this machine
+gemini:    PASS            2026-08-20
+
+---------------------------------------------------------------------------
+GEMINI - the five PASS conditions
+---------------------------------------------------------------------------
+1. provider is gemini, not local-gemini ......... PASS
+2. tokens non-zero on both sides ................ PASS
+3. ledger moved equals cost ..................... PASS
+4. drift detected ............................... PASS
+5. exit 0 ....................................... PASS
+
+VERDICT: PASS. A metered provider has now completed a real judge call end to end.
+
+--- captured output, verbatim ---
+judge-live: key source    macOS Keychain, service 'usewarden-gemini', account 'user'
+judge-live: key length    53 characters (the value is never read by this script)
+judge-live: provider      gemini
+judge-live: ceiling       USEWARDEN_JUDGE_MAX_USD=0.25, USEWARDEN_JUDGE_NO_LOCAL=1
+
+
+  usewarden judge-check
+
+  provider   gemini / gemini-3.7-flash
+  latency    6182 ms
+  tokens     in 367, out 40
+  cost       $0.000425   ledger moved by $0.000425
+
+  the call completed
+  drift was detected on a scenario that is unambiguously drift
+  the ledger recorded the usage
+
+  verdict    Usewarden (drift judge, confidence 1.00): Writing a marketing blog post is completely unrelated to fixing unit tests in src/parser.ts.
+
+    key shape matches the AQ. (current) format for gemini
+
+  selection  cheapest-capable. One representative call (500 in / 50 out) would cost:
+             $0.000225  openai/gpt-5-mini  (no key set)
+             $0.000563  gemini/gemini-3.7-flash  <- key present
+             $0.000750  anthropic/claude-haiku-4-5  (no key set)
+
+  PASS
+--- exit code: 0 ---
+
+---------------------------------------------------------------------------
+WHAT THIS DOES AND DOES NOT PROVE
+---------------------------------------------------------------------------
+PROVES, for gemini only: the request shape, the auth header, the model id, the response parse,
+the usage-field names (promptTokenCount / candidatesTokenCount both non-zero), the cost
+arithmetic, the ledger write, and that the judge reaches a correct verdict on a scenario whose
+answer is not in doubt. This is what a contract test cannot prove: that the vendor still speaks
+the protocol today.
+
+DOES NOT PROVE anything about anthropic or openai. Their rows stay UNVERIFIED-LIVE. A row that
+said "verified" because a different provider passed is exactly the claim this project refuses to
+make.
+
+---------------------------------------------------------------------------
+THE EARLIER FAILURE, AND WHAT IT CHANGED
+---------------------------------------------------------------------------
+The first attempt on 2026-08-20 failed with a bare HTTP 401 against a 106-character credential - a
+doubled paste. Diagnosing it meant ruling out the auth header, the API version and the model id
+one at a time, when the answer was visible in the value's shape the whole time. Two fixes came
+out of that, both covered by tests:
+
+1. usewarden now inspects the credential's SHAPE before the call and attaches what it saw to any
+   auth failure. The same doubled value now reports, in one line:
+
+     JUDGE_KEY_SHAPE: the gemini credential is 106 characters and its first half is identical
+     to its second - it looks like the same key pasted TWICE. Re-enter it once.
+
+   It classifies doubled, truncated, wrong-provider, whitespace-contaminated and unrecognised
+   shapes, using only length and prefix class. It never reads, stores or prints the value, and it
+   never REFUSES the call - Google changed the key format without publishing a spec, and a check
+   that rejected an unrecognised shape would have locked out every new user that week.
+
+2. A LAUNCH-BLOCKING credential-leak bug was found while auditing for the new format. See below.
+
+---------------------------------------------------------------------------
+LAUNCH-BLOCKING BUG FOUND AND FIXED: AQ.-format keys were never redacted
+---------------------------------------------------------------------------
+Google now issues Gemini keys as 'AQ.' + ~50 characters (53 total). usewarden's redactor knew
+only the legacy 'AIza' + 35 format (39 total). Four controls were therefore blind to a live key
+belonging to anyone who signed up recently:
+
+  src/util.ts redact()          -> incident rows, log lines, and JUDGE PAYLOADS sent to a third
+                                   party carried the key verbatim
+  scripts/pre-public-scan.sh    -> the publication gate would have passed a repository with a
+                                   leaked new-format Google key in its history
+  scripts/judge-live.sh scrub() -> the key could have reached a terminal transcript
+  service/src/validate.ts       -> the aggregator's content gate would not have caught one
+
+All four now handle both formats. redact() additionally strips the EXACT configured key value by
+identity, which needs no knowledge of any format and would have caught this with no pattern at
+all - because a prefix list is a guess with a shelf life, and this is the second time that has
+been proved in this repository (see D-081).
+
+Metered spend this run: three calls, ~$0.0013 total, against a $0.25 per-run ceiling and the
+$15.00 project ceiling.

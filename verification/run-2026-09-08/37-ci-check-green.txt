@@ -1,0 +1,13 @@
+=== the config check, running for real on a GitHub runner ===
+  ok    block scalar bodies are ignored
+  ok    trailing comments are stripped
+  ok    CODEOWNERS actors and teams
+
+  scanned 6 file(s), found 15 reference(s)
+  checked against djayamah/usewarden: 15 labels, 2 environments
+
+PASS  every label, environment, actor and team named in .github/ exists in djayamah/usewarden
+[36;1m./scripts/publish-rehearsal.sh[0m
+shell: /usr/bin/bash -e {0}
+env:
+  SCAN_SKIP_GITLEAKS: 1

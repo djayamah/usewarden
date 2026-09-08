@@ -1,0 +1,20 @@
+✔ R1: the stored action survives a round trip untruncated and with newlines intact (5.341333ms)
+✔ R2: a pre-v4 incident is recovered from its event row, and says so (3.260541ms)
+✔ R3: an incident with no joinable event is UNREPLAYABLE, never guessed at (3.776625ms)
+✔ R4: replay never touches the filesystem, on EITHER of the two probe paths (1.119166ms)
+✔ R5: an unevaluable deciding rule makes the row indeterminate, not a pass (0.358125ms)
+✔ R6: redaction happens on READ, and the stored bytes keep the secret intact (3.7255ms)
+✔ S1 SABOTAGE: a forged label flips precision, and the hash check refuses it (0.253833ms)
+✔ S2 SABOTAGE: editing the CRITERION is refused too (0.083292ms)
+✔ S3 SABOTAGE: re-pointing a verified label set at a different corpus is refused (0.10525ms)
+✔ S4: precision and coverage come from ONE pass, and an indeterminate is never a pass (0.116833ms)
+✔ S5: precision is `unavailable`, never 0 or 1, when nothing blocks (0.05625ms)
+✔ S6: the frozen hash is read from FROZEN.sha256 in shasum format (0.887375ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 83.873

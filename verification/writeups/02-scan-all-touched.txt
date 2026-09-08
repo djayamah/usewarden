@@ -1,0 +1,21 @@
+FINDING  DECISIONS.md:3151  [operator-identity]  <redacted>
+FINDING  DECISIONS.md:3153  [operator-identity]  <redacted>
+FINDING  DECISIONS.md:3166  [operator-identity]  <redacted>
+FINDING  DECISIONS.md:3218  [operator-identity]  <redacted>
+FINDING  DECISIONS.md:3438  [operator-identity]  <redacted>
+FINDING  DECISIONS.md:3497  [operator-identity]  <redacted>
+FINDING  DECISIONS.md:107  [absolute home path]  <redacted>
+FINDING  DECISIONS.md:1778  [absolute home path]  <redacted>
+FINDING  DECISIONS.md:1439  [.local hostname]  <redacted>
+FINDING  DECISIONS.md:1438  [credential-shaped token]  <redacted>
+FINDING  DECISIONS.md:2032  [credential-shaped token]  <redacted>
+FINDING  DECISIONS.md:3169  [credential-shaped token]  <redacted>
+FINDING  DECISIONS.md:1440  [email address]  <email-redacted>
+FINDING  DECISIONS.md:2366  [email address]  <email-redacted>
+FINDING  README.md:670  [absolute home path]  <redacted>
+FINDING  README.md:559  [credential-shaped token]  <redacted>
+FINDING  ops/DOGFOOD.md:79  [operator-identity]  <redacted>
+FINDING  ops/DOGFOOD.md:82  [operator-identity]  <redacted>
+
+files scanned: 32   identity literals: 7   findings: 18
+=== BLOCKED - do not publish this text ===

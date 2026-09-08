@@ -17,15 +17,11 @@ mkdir -p "$OUT"
 # the browser against the REAL home directory and then runs the dashboard under a synthetic one,
 # so that the rendered page contains no real account name; without these two overrides that is
 # impossible, because the browser lookup and the page content need different homes.
-SHELL_BIN="${SHELL_BIN:-}"
-[ -n "$SHELL_BIN" ] && [ -x "$SHELL_BIN" ] || for c in \
-  "$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/chrome-headless-shell" \
-  "$(command -v chrome-headless-shell || true)" \
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"; do
-  [ -n "$c" ] && [ -x "$c" ] && { SHELL_BIN="$c"; break; }
-done
-[ -n "$SHELL_BIN" ] || { echo "FAIL: no headless browser found. Screenshots CANNOT be produced." >&2; exit 1; }
-echo "browser: $SHELL_BIN"
+# Which browser, and is it allowed? One shared resolver, four consumers - see D-234 and the header
+# of scripts/resolve-browser.sh. `SHELL_BIN` from the environment is honoured and fenced identically:
+# an override is not an exemption.
+. "$REPO/scripts/resolve-browser.sh"
+usewarden_resolve_browser "$REPO" || exit 1
 
 export USEWARDEN_HOME="${USEWARDEN_HOME:-$REPO/.usewarden-live}"
 PROFILE="$(mktemp -d)"

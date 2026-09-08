@@ -297,9 +297,28 @@ describe('a command is what runs, not what it mentions (D-139)', () => {
       'a heredoc executed by a shell must still be scanned');
   });
 
-  test('an interpreter on the heredoc line disables stripping', () => {
-    assert.equal(stripDataHeredocs("python3 - <<'EOF'\nrm -rf ~/\nEOF").includes('rm -rf'), true);
+  test('a SHELL on the heredoc line disables stripping', () => {
     assert.equal(stripDataHeredocs("bash <<'EOF'\nrm -rf ~/\nEOF").includes('rm -rf'), true);
+    assert.equal(stripDataHeredocs("sh -s <<'EOF'\nrm -rf ~/\nEOF").includes('rm -rf'), true);
+  });
+
+  test('a NON-SHELL interpreter disables stripping only if the body can reach a shell (D-256)', () => {
+    // NARROWED 2026-08-26, and the case below is the reason. `python3 - <<EOF` with a body of
+    // `rm -rf ~/` was scanned as shell — but python reads that body as a PROGRAM, and `rm -rf ~/`
+    // is not Python, it is a SyntaxError. Nothing runs. Treating it as a command was conservative
+    // rather than correct, and the cost was measured: it was two of the three false positives
+    // that survived on six days of real agent traffic.
+    assert.equal(stripDataHeredocs("python3 - <<'EOF'\nrm -rf ~/\nEOF").includes('rm -rf'), false);
+
+    // But a body that CAN reach a shell is still scanned in full, which is the whole safety
+    // argument for the line above.
+    const escaping = "python3 - <<'EOF'\nimport os\nos.system('rm -rf ~/')\nEOF";
+    assert.match(escaping, /os\.system/, 'setup failed: no shell escape in the fixture');
+    assert.equal(stripDataHeredocs(escaping).includes('rm -rf'), true);
+
+    const nodeEscaping = "node - <<'EOF'\nrequire('child_process').execSync('rm -rf ~/')\nEOF";
+    assert.match(nodeEscaping, /child_process/, 'setup failed: no shell escape in the fixture');
+    assert.equal(stripDataHeredocs(nodeEscaping).includes('rm -rf'), true);
   });
 
   test('the heredoc may open on ANY line, not just the first', () => {
@@ -342,12 +361,30 @@ describe('a command is what runs, not what it mentions (D-139)', () => {
     }
   });
 
-  test('...but anything that would EXECUTE the body still scans it', () => {
-    for (const sink of ['bash', 'sh -s', 'python3 -', 'node', 'perl', 'ruby', 'eval',
-      'cat <<EOF | bash']) {
+  test('...but anything that would run the body AS SHELL still scans it', () => {
+    for (const sink of ['bash', 'sh -s', 'eval', 'xargs', 'cat <<EOF | bash', 'cat <<EOF | sh']) {
       const cmd = `${sink} <<'EOF'\ngit clean -fdx\nEOF`;
       assert.equal(stripDataHeredocs(cmd).includes('git clean'), true,
-        `a heredoc executed by "${sink}" must be scanned`);
+        `a heredoc executed as shell by "${sink}" must be scanned`);
+    }
+  });
+
+  test('a foreign-language sink scans the body whenever the body can shell out', () => {
+    // The non-shell interpreters are exempted only on a body with no route back to a shell
+    // (D-256). Each case here carries a real escape, and each asserts the escape is present
+    // before asserting the scan — CLAUDE.md §4.2.
+    const cases: [string, string, RegExp][] = [
+      ['python3 -', "import subprocess; subprocess.run('git clean -fdx', shell=True)", /subprocess/],
+      ['node', "require('child_process').execSync('git clean -fdx')", /child_process/],
+      ['perl', "my $x = qx{git clean -fdx};", /qx\{/],
+      ['ruby', 'puts `git clean -fdx`', /`/],
+      ['php', "shell_exec('git clean -fdx');", /shell_exec/],
+    ];
+    for (const [sink, body, present] of cases) {
+      assert.match(body, present, `setup failed: no escape in the ${sink} fixture`);
+      const cmd = `${sink} <<'EOF'\n${body}\nEOF`;
+      assert.equal(stripDataHeredocs(cmd).includes('git clean'), true,
+        `a ${sink} heredoc that shells out must be scanned`);
     }
   });
 

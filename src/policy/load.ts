@@ -53,6 +53,17 @@ export function untrust(repoPolicyPath: string): void {
   fs.writeFileSync(f, kept.length ? kept.join('\n') + '\n' : '', { mode: 0o600 });
 }
 
+/**
+ * Parses ONE policy file over the built-in defaults, with no layering and no trust logic.
+ *
+ * `usewarden replay --policy FILE` needs this: replaying against "the rules as they were" means
+ * reading a specific file, not re-running the layered load that would fold in whatever is in
+ * ~/.usewarden and the current repo today.
+ */
+export function parsePolicyFile(file: string, repoRoot?: string): Policy {
+  return parseFile(file, defaultPolicy(repoRoot ?? findRepoRoot(process.cwd()) ?? process.cwd()));
+}
+
 function parseFile(file: string, base: Policy): Policy {
   let text: string;
   try {
@@ -109,6 +120,18 @@ export function loadPolicy(cwd: string): LoadedPolicy {
     const trusted = isTrusted(repoPolicy);
     const candidate = parseFile(repoPolicy, policy);
     policy = trusted ? candidate : narrowOnly(userLayer, candidate, repoRoot, notices);
+    // `trust` widens SCOPE. It does not hand a repository the destination of your record.
+    // narrowOnly already clamps this; the trusted branch takes `candidate` wholesale, so without
+    // this line "usewarden trust" would quietly become "let this repo choose where a copy of
+    // every command every agent ran on this machine is written". Clamped in both branches so the
+    // comment in narrowOnly is true as written.
+    if (trusted && candidate.backup.dir !== userLayer.backup.dir) {
+      notices.push({
+        code: 'POLICY_WIDENING_REFUSED',
+        detail: `repo usewarden.yaml tried to set backup.dir to ${String(candidate.backup.dir)}. Ignored even though this policy is trusted - trust widens scope, it does not choose where your record is copied.`,
+      });
+      policy = { ...policy, backup: structuredClone(userLayer.backup) };
+    }
     sources.push(trusted ? `${repoPolicy} (trusted)` : `${repoPolicy} (untrusted, narrowing only)`);
     hashes[repoPolicy] = sha256(fs.readFileSync(repoPolicy));
   }
@@ -192,6 +215,22 @@ function narrowOnly(user: Policy, repo: Policy, repoRoot: string, notices: Polic
     notices.push({
       code: 'POLICY_WIDENING_REFUSED',
       detail: 'repo usewarden.yaml tried to enable telemetry. Ignored - telemetry is opt-in by you only.',
+    });
+  }
+
+  // BACKUP IS THE USER'S ALONE, AND THIS IS A SECURITY BOUNDARY, NOT A PREFERENCE.
+  //
+  // `backup.dir` names a directory that usewarden will copy the WHOLE cross-project record into:
+  // every command every agent ran, in every repository, on this machine. A repo policy that could
+  // set it would be handing any cloned repository a one-line exfiltration primitive - point it at
+  // a synced folder and the record walks out. `out` starts as a clone of the user layer, so the
+  // repo value was already being dropped; what was missing is usewarden SAYING SO, and a silent
+  // refusal is indistinguishable from a setting that worked.
+  out.backup = structuredClone(user.backup);
+  if (repo.backup.dir !== null && repo.backup.dir !== user.backup.dir) {
+    notices.push({
+      code: 'POLICY_WIDENING_REFUSED',
+      detail: `repo usewarden.yaml tried to set backup.dir to ${repo.backup.dir}. Ignored - only your global policy decides where a copy of your record is written, and no amount of trusting a repo changes that.`,
     });
   }
 

@@ -1,0 +1,18 @@
+  blocked now           53
+  unchanged             63
+  now allowed           39
+  newly blocked         0
+  same block, new rule  1
+  indeterminate         0
+  unreplayable          0
+
+PRECISION AND COVERAGE, against the frozen label set
+  labels  92 incidents, labelled 2026-09-08
+
+                        BEFORE (as recorded)    AFTER (rules under test)
+  precision             54.3%  (50/92)          94.3%  (50/53)
+  coverage              100.0%  (50/50)         100.0%  (50/50)
+  false positives       42                      3
+  unknown, still firing 0                       0
+  indeterminate         0                       0
+

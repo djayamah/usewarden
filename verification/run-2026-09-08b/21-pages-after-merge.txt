@@ -1,0 +1,7 @@
+=== the pages workflow after the merge — and did the NEW split run? ===
+  success	2026-09-08T04:10:11Z	92bc5375	34186030405
+  success	2026-09-08T00:48:39Z	b47fe47c	34174534355
+  success	2026-08-24T12:26:13Z	957dc662	32727086493
+--- jobs in run 34186030405 ---
+  The published site fetches nothing -> success
+  deploy -> success

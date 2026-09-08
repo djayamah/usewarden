@@ -213,9 +213,73 @@ npx usewarden demo      # see a real incident card in under a minute
 npx usewarden status    # is it actually protecting you right now?</code></pre>
 
   <div class="note">
-    <strong>Not yet published.</strong> usewarden is built and verified but has not been released
-    to npm. The commands above are what the shipped tool does; they will not resolve today.
+    <strong>Published through OIDC trusted publishing, with no npm token in existence.</strong>
+    CI can only ever <em>stage</em> the package; a human approves it on npmjs.com with a hardware
+    security key. <code>npm audit signatures</code> reports a verified registry signature and a
+    verified attestation, and the provenance names the exact commit it was built from.
   </div>
+
+  <h2>If Claude Code is the only agent you run, read this first</h2>
+
+  <p>
+    Claude Code has its own permission system, and for <em>blocking</em> it is as good as
+    usewarden &mdash; and in two specific cases <strong>better</strong>. You should hear that from
+    us rather than discover it. Everything below was measured against the shipped hook binary
+    (<code>node scripts/probe-native-gap.mjs</code>); the native side is from Anthropic's own
+    documentation.
+  </p>
+
+  <div class="tablewrap">
+  <table>
+    <thead>
+      <tr><th>The agent tries to&hellip;</th><th>usewarden</th><th>Claude Code's own controls</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>rm -rf</code> above the project, force-push, privilege escalation</td>
+        <td>blocks</td>
+        <td>a <code>Bash(&hellip;)</code> deny rule &mdash; <strong>equal</strong>, and blunter,
+            which is arguably safer</td>
+      </tr>
+      <tr>
+        <td>read a private path, or write outside the project, with its file tools</td>
+        <td>blocks</td>
+        <td>a <code>Read(&hellip;)</code> deny rule and working-directory confinement &mdash;
+            <strong>equal</strong></td>
+      </tr>
+      <tr>
+        <td><strong>write outside the project by shell redirect</strong></td>
+        <td><strong>does not block</strong></td>
+        <td><strong>blocks.</strong> Claude Code checks the target of <code>&gt;</code>,
+            <code>&gt;&gt;</code> and <code>2&gt;</code> as a file write
+            (<a href="https://code.claude.com/docs/en/permissions#redirections">permissions</a>)</td>
+      </tr>
+      <tr>
+        <td><strong>write outside the project from a subprocess it spawns</strong></td>
+        <td><strong>does not block</strong></td>
+        <td><strong>blocks, with <code>/sandbox</code>.</strong> The OS sandbox covers &ldquo;any
+            scripts, programs, or subprocesses that are spawned by the command&rdquo;
+            (<a href="https://www.anthropic.com/engineering/claude-code-sandboxing">sandboxing</a>)</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>
+    <strong>So if blocking is all you want, and Claude Code is all you run, you do not need this.</strong>
+    Turn on <code>/sandbox</code>, write the deny rules, and you are better covered for
+    out-of-scope writes than usewarden can make you.
+  </p>
+
+  <p>
+    What usewarden adds is not more blocking. It is <strong>a record that is still readable next
+    week</strong> &mdash; 57 incidents across 22 real sessions on the machine that built it, which
+    is how we found that 34 of them fired on text about a command rather than a command;
+    <strong>one policy across six agents</strong> instead of six separate configs; and
+    <strong>drift</strong>, comparing what the agent is doing against the goal it was given, which
+    has no native equivalent. The honest pitch is not &ldquo;we block what Claude Code cannot&rdquo;.
+    It is: we are the only thing that remembers, and the only policy your five other agents share.
+  </p>
 
   <h2>Two layers, in this order</h2>
 
@@ -351,6 +415,14 @@ npx usewarden status    # is it actually protecting you right now?</code></pre>
     <li>Layer 2 is sampled and fallible. It warns; it never blocks alone.</li>
     <li>It is not a sandbox. A determined agent with shell access has other routes; usewarden
         raises the cost and creates the record, it does not make the machine safe.</li>
+    <li><strong>A shell redirect out of the project is not blocked</strong>, and neither is a
+        subprocess that opens a file itself. Matching <code>&gt;</code> would fire on every
+        legitimate redirect anyone runs. Claude Code's own controls do cover both &mdash; see the
+        comparison above.</li>
+    <li><strong>Text about a dangerous command can be mistaken for the command.</strong> Layer 1
+        matches the raw command string, so writing a runbook that names a release command can be
+        refused as though it were one. Over six days on the machine that built usewarden, 34 of 57
+        recorded incidents were this, and one rule was wrong every single time it fired.</li>
     <li>The savings figures are estimates, and say so on every surface.</li>
   </ul>
 

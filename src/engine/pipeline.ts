@@ -1,5 +1,5 @@
 import * as path from 'node:path';
-import type { Incident, IncidentOrigin, NormalizedEvent, Verdict } from '../types.js';
+import type { Incident, IncidentOrigin, NormalizedEvent, ReplayableAction, Verdict } from '../types.js';
 import { ALLOW } from '../types.js';
 import type { Store } from '../store.js';
 import { loadPolicy, type LoadedPolicy } from '../policy/load.js';
@@ -10,6 +10,7 @@ import { maybeJudge, type JudgeOutcome } from './judge.js';
 import { loadExceptions } from '../exceptions.js';
 import { dispatchJudge } from './detached.js';
 import { applyInterventions, type InterventionResult } from './interventions.js';
+import { maybeAutoBackup } from '../backup.js';
 
 export interface HandleResult {
   verdict: Verdict;
@@ -58,7 +59,14 @@ export async function handleEvent(
 
   const repoRoot = findRepoRoot(e.cwd) ?? undefined;
   store.upsertSession(e.sessionId, e.agent, e.cwd, e.ts, origin);
-  if (e.event === 'session_end') store.endSession(e.sessionId, e.ts);
+  if (e.event === 'session_end') {
+    store.endSession(e.sessionId, e.ts);
+    // The record just stopped changing, and this is already a hook usewarden runs — so the copy
+    // is refreshed here rather than by anything the user has to schedule or remember. Off unless
+    // `backup.dir` is set; throttled by `backup.every_hours`; never throws. See src/backup.ts.
+    const note = maybeAutoBackup(policy.backup);
+    if (note) warnings.push(note);
+  }
   if (e.event === 'user_prompt' && e.prompt && !store.getGoal(e.sessionId)) {
     store.setGoal(e.sessionId, redact(e.prompt).slice(0, 2000));
   }
@@ -87,7 +95,7 @@ export async function handleEvent(
   const interventions: InterventionResult[] = [];
 
   if (verdict.severity !== 'info') {
-    incidentId = record(store, e, verdict, opts.live, origin);
+    incidentId = record(store, e, verdict, opts.live, origin, branch, repoRoot);
     interventions.push(...applyInterventions(verdict, e, policy, repoRoot));
   }
 
@@ -115,7 +123,7 @@ export async function handleEvent(
     judge = await maybeJudge(store, e, policy, verdict);
     if (judge.warning) warnings.push(judge.warning);
     if (judge.verdict && judge.verdict.severity !== 'info' && verdict.decision !== 'deny') {
-      const jid = record(store, e, judge.verdict, opts.live, origin);
+      const jid = record(store, e, judge.verdict, opts.live, origin, branch, repoRoot);
       if (incidentId === undefined) incidentId = jid;
       // Layer 2 never blocks on its own - it warns. Escalating a sampled, fallible, prompt-
       // injectable signal into a hard block is how a guardian becomes unusable.
@@ -141,7 +149,30 @@ export function recordJudgeFinding(store: Store, e: NormalizedEvent, v: Verdict,
   return record(store, e, v, live, origin);
 }
 
-function record(store: Store, e: NormalizedEvent, v: Verdict, live: boolean, origin?: IncidentOrigin): number {
+/**
+ * The replay input for an event: the fields Layer 1 actually reads, copied without alteration.
+ *
+ * `branch` is captured rather than left to be re-derived, because `force-push-protected` asks
+ * whether the CURRENT branch is protected and the branch will have moved by replay time. A
+ * replay that re-read it from disk would be measuring today's checkout instead of the incident.
+ */
+export function replayableOf(e: NormalizedEvent, branch?: string, repoRoot?: string): ReplayableAction {
+  return {
+    agent: e.agent,
+    event: e.event,
+    cwd: e.cwd,
+    ...(repoRoot !== undefined ? { repoRoot } : {}),
+    ...(e.tool ? { tool: e.tool } : {}),
+    ...(e.rawTool ? { rawTool: e.rawTool } : {}),
+    ...(e.command !== undefined ? { command: e.command } : {}),
+    ...(e.filePath !== undefined ? { filePath: e.filePath } : {}),
+    ...(e.prompt !== undefined ? { prompt: e.prompt } : {}),
+    ...(typeof e.contextFill === 'number' ? { contextFill: e.contextFill } : {}),
+    ...(branch !== undefined ? { branch } : {}),
+  };
+}
+
+function record(store: Store, e: NormalizedEvent, v: Verdict, live: boolean, origin?: IncidentOrigin, branch?: string, repoRoot?: string): number {
   const inc: Incident = {
     sessionId: e.sessionId,
     agent: e.agent,
@@ -152,6 +183,11 @@ function record(store: Store, e: NormalizedEvent, v: Verdict, live: boolean, ori
     rule: v.rule ?? '(unattributed)',
     title: titleFor(v, e),
     attempted: redact(describeAttempt(e)),
+    // VERBATIM. Not redacted, not one-lined, not truncated - see Incident.replayable and D-277.
+    // Redaction of this field happens at every READ path instead; `redactAction()` in
+    // src/replay.ts is the single function that does it, so a new display surface added later
+    // cannot forget to call it.
+    replayable: replayableOf(e, branch, repoRoot),
     reason: oneLine(v.reason),
     tool: e.rawTool ?? e.tool ?? e.event,
     target: oneLine(redact(e.filePath ?? e.command ?? '')),

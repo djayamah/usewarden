@@ -1,0 +1,21 @@
+=== PRE-PUBLIC SCAN ===
+captured:  2026-08-20T15:37:29Z
+repo:      ~/warden
+scope:     history (triage-bot-fix)
+classes:   all
+head:      ce8691ba17d432d0af17bea8e269d0f276b2d1ea
+gitleaks:  8.30.1
+
+--- PASS 1: gitleaks, full history ---
+CLEAN    gitleaks: 0 findings across 8 commit(s)
+
+--- PASS 2: pattern scan, every blob in history ---
+         identity strings derived for this machine: 11 (not printed)
+         blobs scanned: 176 (of 251 candidates)
+BLOCKER  pattern scan: 1 finding(s) in 1 categor(y/ies)
+           [operator-identity] 1 hit(s) in 1 file(s):
+             ops/BOT-SCOPE.md  x1  (blob 92b9d69ead line 7): <redacted: line matched a machine-identity string>
+
+objects considered: 261
+
+=== SCAN BLOCKED - 1 pass(es) found something. DO NOT change visibility. ===

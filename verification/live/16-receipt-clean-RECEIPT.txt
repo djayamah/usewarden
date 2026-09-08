@@ -1,0 +1,18 @@
+
+  usewarden receipt  claude  session 81ab72cc…
+
+  session     2026-08-24 11:41:44Z → 2026-08-24 11:42:00Z  (15s)
+  boundary    session-end-hook  — the agent's own session-end hook fired
+  project     ~/dev/warden/fixtures/sandbox-project
+  goal        "Read README.md and package.json, then tell me in two sentence…"
+
+  did         7 events · 2 files touched · 0 commands run
+  caught      0 blocked · 0 warned · 0 outside scope
+  context     unavailable — no agent currently reports context fill to usewarden —
+              no adapter populates it, so context.warn_pct cannot fire in production
+              either (D-224). This is not a gap in this session; it is a gap in the
+              product.
+  guardian    3 judge calls · $0.0000 metered · 3 unpriced local
+
+  Nothing needed blocking this session. That is the good outcome, and this
+  receipt is the evidence it happened: 7 events were inspected against your policy.

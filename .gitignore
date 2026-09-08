@@ -18,3 +18,31 @@ fixtures/remote.git/
 scripts/scan-identity.txt
 scripts/forbidden-paths.txt
 .usewarden-shot/
+.publish-rehearsal/
+.worktrees/
+.push-receipts/
+
+# Browsers and an npm cache kept INSIDE the repo, because a write outside it is not authorised
+# (CLAUDE.md §3) and the previously-used browser resolved into a forbidden path (D-234).
+.browsers/
+.npm-cache/
+
+# The corpus snapshots written by `usewarden backup`. Real agent sessions from this machine —
+# commands, targets, session goals. NEVER committed. They live inside the repo on purpose: ~/dev
+# is what the offsite backup already reaches, and a write outside it is not authorised
+# (CLAUDE.md §3). See ops/DOGFOOD.md and DECISIONS D-248.
+#
+# ANCHORED with a leading slash, deliberately. Unanchored, `corpus-backup/` matches a directory of
+# that name at ANY depth - which silently swallowed `verification/corpus-backup/`, the transcripts
+# that are the whole evidence for this working. An ignore rule that hides your proof is worse than
+# no rule.
+/corpus-backup/
+
+# The label set for the precision corpus. Same reason as /corpus-backup/: it names real commands
+# and real paths from real sessions on this machine. The FROZEN.sha256 beside it IS committed —
+# it is 64 hex characters and leaks nothing, and committing it is what makes a relabelling after
+# tuning began visible in the history rather than silent. See docs/PRECISION.md.
+/corpus-labels/*
+!/corpus-labels/FROZEN.sha256
+!/corpus-labels/README.md
+.work/

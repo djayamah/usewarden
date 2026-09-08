@@ -1,0 +1,56 @@
+ npm notice
+ npm notice 📦  usewarden@0.1.0
+ npm notice Tarball Contents
+ npm notice 1.1kB LICENSE
+ npm notice 37.6kB README.md
+ npm notice 5.2kB SECURITY.md
+ npm notice 211.7kB assets/dashboard.png
+ npm notice 69.6kB assets/incident-card.png
+ npm notice 3.4kB dist/src/adapters/claude.js
+ npm notice 1.8kB dist/src/adapters/index.js
+ npm notice 13.2kB dist/src/adapters/others.js
+ npm notice 1.0kB dist/src/adapters/registry.js
+ npm notice 3.2kB dist/src/adapters/toolnames.js
+ npm notice 790B dist/src/boot.js
+ npm notice 53.4kB dist/src/cli.js
+ npm notice 11.7kB dist/src/dashboard.js
+ npm notice 5.4kB dist/src/demo.js
+ npm notice 2.4kB dist/src/engine/detached.js
+ npm notice 15.1kB dist/src/engine/gitstate.js
+ npm notice 2.6kB dist/src/engine/interventions.js
+ npm notice 27.5kB dist/src/engine/judge.js
+ npm notice 27.5kB dist/src/engine/layer1.js
+ npm notice 6.6kB dist/src/engine/pipeline.js
+ npm notice 8.7kB dist/src/exceptions.js
+ npm notice 4.7kB dist/src/hook.js
+ npm notice 960B dist/src/index.js
+ npm notice 6.3kB dist/src/install/detect.js
+ npm notice 9.8kB dist/src/install/entries.js
+ npm notice 14.9kB dist/src/install/installer.js
+ npm notice 3.3kB dist/src/install/jsonfile.js
+ npm notice 11.1kB dist/src/metrics.js
+ npm notice 1.4kB dist/src/paths.js
+ npm notice 3.4kB dist/src/policy/inputs.js
+ npm notice 11.9kB dist/src/policy/load.js
+ npm notice 19.6kB dist/src/policy/schema.js
+ npm notice 8.4kB dist/src/policy/yaml.js
+ npm notice 17.0kB dist/src/receipt.js
+ npm notice 14.1kB dist/src/scan.js
+ npm notice 13.1kB dist/src/status.js
+ npm notice 2.8kB dist/src/statusline.js
+ npm notice 19.4kB dist/src/store.js
+ npm notice 9.0kB dist/src/telemetry.js
+ npm notice 7.7kB dist/src/term.js
+ npm notice 315B dist/src/types.js
+ npm notice 10.2kB dist/src/util.js
+ npm notice 2.0kB package.json
+ npm notice Tarball Details
+ npm notice name: usewarden
+ npm notice version: 0.1.0
+ npm notice filename: usewarden-0.1.0.tgz
+ npm notice package size: 399.3 kB
+ npm notice unpacked size: 700.5 kB
+ npm notice shasum: b47ed45830f5369741cda56568d403ed115e7bff
+ npm notice integrity: sha512-k6Liz7aBBVe+I[...]B9Yg0W3z+mxUA==
+ npm notice total files: 43
+ npm notice

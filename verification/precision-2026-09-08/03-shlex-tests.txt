@@ -1,0 +1,23 @@
+✔ L1: a command name is the first field, not a filename that looks like one (1.318708ms)
+✔ L2: a leading VAR=value does not consume the command position (0.093417ms)
+✔ L3: quoting is recorded, and a heredoc delimiter records whether IT was quoted (0.064833ms)
+✔ L4: a command substitution wrapping a here-document lexes (0.0985ms)
+✔ L5: backslash-newline is a continuation, not a statement boundary (0.05425ms)
+✔ L6 SABOTAGE: the lexer refuses what it does not understand, and refusing means no stripping (0.60675ms)
+✔ L7: a command substitution is spanned and flagged, never silently dropped (0.064417ms)
+✔ L8: unquote strips one layer and expands nothing (0.035167ms)
+✔ C1: a quoted-delimiter python body containing a MARKDOWN BACKTICK is data (1.444959ms)
+✔ C1b SABOTAGE: an UNQUOTED delimiter still fails closed on a substitution (0.134125ms)
+✔ C1c SABOTAGE: a shell after a pipe still wins over a foreign opener (0.102584ms)
+✔ C1d SABOTAGE: a route back to a shell IN THAT LANGUAGE still fails closed (0.170625ms)
+✔ C1e SABOTAGE: an opener line passed where a verb is expected fails closed (0.035125ms)
+✔ C2: `grep -n 'npm publish' FILE` searches FOR the phrase (0.402125ms)
+✔ C2b: a git commit message is prose the command carries (0.172666ms)
+✔ C2c SABOTAGE: an interpreter is NOT inert, and a substitution is never blanked (0.111834ms)
+✔ C2d: a foreign `-e` program is source in that language, like a heredoc body (0.229083ms)
+✔ C2e SABOTAGE: a foreign `-e` program that shells out still fails closed (0.046ms)
+✔ G1: blanking preserves offsets, so statement splitting and the incident card are unchanged (0.049334ms)
+✔ G2: a plain dangerous command is completely untouched by any of this (0.084083ms)
+ℹ tests 20
+ℹ pass 20
+ℹ fail 0

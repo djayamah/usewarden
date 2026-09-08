@@ -67,30 +67,66 @@ echo "=== SANITISE FOR PUBLICATION ==="
 # clean. Same script, same input, two different answers, and the machine-specific one was the
 # reassuring one. The rule a published file actually needs is "no home directory belonging to
 # anybody", which is machine-independent and strictly stronger.
-apply 's{/Users/(?!you/)[A-Za-z0-9._-]+/}{/Users/you/}g' "home paths -> /Users/you/"
-apply 's{/home/(?!you/)(?!runner/)[A-Za-z0-9._-]+/}{/home/you/}g' "linux home paths -> /home/you/"
+# TESTS ARE EXEMPT FROM EVERY PATH REWRITE BELOW, AND THIS IS THE REASON.
+#
+# A test fixture whose SUBJECT is a path shape gets its meaning changed by a rule that rewrites
+# that shape. Three of them did, silently, and nothing noticed until condition 4 of the public-push
+# gate built and ran the suite of the tree being pushed:
+#
+#   tests/shlex.test.ts  asserts a write to an agent scratchpad is IN SCOPE. Rule 4 rewrote the
+#                        fixture into a path that is not a scratchpad, so the published suite
+#                        asserted 'allow' on something the engine correctly denies, and failed.
+#   tests/service.test.ts asserts the telemetry content gate CATCHES a home path. Rule 1 rewrote
+#                        the fixture into the synthetic persona the gate is meant to accept.
+#
+# The published repository's own `npm test` went from 526 green to 9 failures, and the cause was
+# not a code change at all - it was the sanitiser editing the evidence.
+#
+# Fixtures are synthetic by construction, so there is nothing in them to redact. And if one ever
+# does carry a real identity, the SCANNER still reads tests/ and blocks the publication loudly,
+# which is the outcome you want: a rewrite that quietly changes a test's meaning is worse than a
+# refusal that says so.
+apply 's{/Users/(?!you/)[A-Za-z0-9._-]+/}{/Users/you/}g unless $ARGV =~ m{^(?:\./)?tests/}' "home paths -> /Users/you/"
+apply 's{/home/(?!you/)(?!runner/)[A-Za-z0-9._-]+/}{/home/you/}g unless $ARGV =~ m{^(?:\./)?tests/}' "linux home paths -> /home/you/"
 
 # 2. hostname / account name / private project names, from the untracked identity file.
 if [ -f scripts/scan-identity.txt ]; then
   while IFS= read -r s; do
     case "$s" in ''|'#'*) continue ;; esac
     esc="$(printf '%s' "$s" | perl -pe 's/([^A-Za-z0-9_])/\\$1/g')"
-    apply "s/$esc/REDACTED/gi" "identity string -> REDACTED"
+    apply "s/$esc/REDACTED/gi unless \$ARGV =~ m{^(?:\./)?tests/}" "identity string -> REDACTED"
   done < scripts/scan-identity.txt
 fi
 
 # 3. a third party's email address captured from the npm registry.
-apply 's{\b[A-Za-z0-9._%+-]+\@[A-Za-z0-9.-]+\.(?:com|net|org|io|co|me)\b(?!\w)}{<email-redacted>}g unless $ARGV =~ m{(SECURITY|CONTRIBUTING|CODE_OF_CONDUCT)\.md$}' \
+apply 's{\b[A-Za-z0-9._%+-]+\@[A-Za-z0-9.-]+\.(?:com|net|org|io|co|me)\b(?!\w)}{<email-redacted>}g unless $ARGV =~ m{(SECURITY|CONTRIBUTING|CODE_OF_CONDUCT)\.md$|^(?:\./)?tests/}' \
       "third-party emails -> <email-redacted>"
 
 # 4. agent-harness scratchpad paths, which encode the home directory a second way
 #    (/private/tmp/claude-<uid>/-Users-<name>-dev-<repo>/...). The sanitiser missed these on its
 #    first pass because they are not literally "/Users/<name>/" - the scanner found them.
-apply 's{/private/tmp/claude-\d+/-Users-[A-Za-z0-9._-]+-dev-[A-Za-z0-9._-]+/[0-9a-f-]+/scratchpad}{/tmp/usewarden-clean-machine}g' \
+apply 's{/private/tmp/claude-\d+/-Users-[A-Za-z0-9._-]+-dev-[A-Za-z0-9._-]+/[0-9a-f-]+/scratchpad}{/tmp/usewarden-clean-machine}g unless $ARGV =~ m{^(?:\./)?tests/}' \
       "harness scratchpad paths -> /tmp/..."
 
+# 4b. THE HOME DIRECTORY ENCODED A THIRD WAY: separator-mangled, as in
+#     `_Users_you_.claude_settings.json`.
+#
+#     Usewarden's own backup naming produces this - `usewarden init` flattens the absolute path of
+#     each config it backs up into a single filename by replacing every `/` with `_`, so the
+#     operator's home directory ends up inside a FILENAME with no slashes in it at all. Rule 1 only
+#     matches `/Users/<name>/` and rule 4 only matches the harness form, so both walked straight
+#     past it, and the string reached a verification artifact that the publication rehearsal then
+#     refused (D-246).
+#
+#     That is the THIRD distinct encoding of the same secret, and the second time the scanner
+#     caught what the sanitiser missed. The lesson is written down rather than just patched: the
+#     scanner derives identity strings independently and is the backstop precisely because this
+#     list will never be complete. A new tool that serialises a path in a new way adds a new form,
+#     and the rehearsal is what makes that a blocked publish instead of a leak.
+apply 's{_Users_[A-Za-z0-9.-]+_}{_Users_you_}g unless $ARGV =~ m{^(?:\./)?tests/}' "separator-mangled home paths -> _Users_you_"
+
 # 5. synthetic personas that are not on the allowlist, normalised to ones that are.
-apply 's{/Users/someone/}{/Users/someone/}g' "synthetic persona /Users/x -> /Users/someone"
+apply 's{/Users/you/}{/Users/you/}g' "synthetic persona /Users/x -> /Users/someone"
 
 # 6. the bare account name where it appears as a FIELD rather than as part of a path -
 #    `ls -l` prints "owner group", and a captured `ls -l` in a verification artifact carries the

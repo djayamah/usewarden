@@ -5,6 +5,9 @@ import { Store } from './store.js';
 import { buildStatus } from './status.js';
 import { head, dim, ok } from './term.js';
 import { fmtTokenBand, fmtUsdBand, type Metrics } from './metrics.js';
+import { buildValueReport, figureReason, SEVERITY_ORDER, type ValueReport } from './value.js';
+import { loadPolicy } from './policy/load.js';
+import { defaultLabelsFile } from './paths.js';
 
 /**
  * Local read-only dashboard.
@@ -109,6 +112,12 @@ export interface Snapshot {
   judgeUnmetered: number;
   checklist: { label: string; done: boolean }[];
   contextWarnPct: number;
+  /**
+   * The value figures. FIRST in the type and first on the page, because every counter below it
+   * goes UP when usewarden is WRONG - which is how a dashboard reports 59 useful events during a
+   * period in which 42 of 92 blocks were false positives.
+   */
+  value: ValueReport;
   incidents: {
     ts: number; agent: string; action: string; title: string; attempted: string;
     reason: string; rule: string; live: number; origin: string; layer: number; severity: string;
@@ -129,6 +138,11 @@ export function snapshot(store: Store): Snapshot {
     judgeUnmetered: r.judge.unmetered,
     checklist: r.checklist.map((c) => ({ label: c.label, done: c.done })),
     contextWarnPct: 60,
+    value: buildValueReport({
+      store,
+      policy: loadPolicy(process.cwd()).policy,
+      labelsFile: defaultLabelsFile(),
+    }),
     incidents: store.recentIncidents(50).map((i) => ({
       ts: i.ts, agent: i.agent, action: i.action, title: i.title,
       attempted: displayPath(i.attempted), reason: displayPath(i.reason),
@@ -136,6 +150,81 @@ export function snapshot(store: Store): Snapshot {
     })),
     generatedAt: Date.now(),
   };
+}
+
+/**
+ * The value block: precision first, coverage beside it, then what was caught and what was wrong.
+ *
+ * EVERY FIGURE HERE CAN RENDER AS "unavailable", AND THAT IS THE POINT. Most machines have no
+ * labelled set, so precision on them is genuinely unknown - and a dashboard that renders unknown
+ * as 0% or as 100% is lying in one direction or the other. The reason is printed beside the word,
+ * because "unavailable" with no explanation reads as broken.
+ */
+function valueSection(v: ValueReport): string {
+  const note = (reason: string): string =>
+    `<p class="unavail"><b>unavailable</b> &mdash; ${esc(reason)}</p>`;
+
+  const headline = v.precision.available && v.coverage.available
+    ? `<div class="grid headline">
+         <div class="stat big"><b>${v.precision.value.pct.toFixed(1)}%</b>
+           <span>precision &mdash; of ${v.precision.value.denominator} blocks that fire today,
+           ${v.precision.value.truePositives} are ones a developer would want</span></div>
+         <div class="stat big"><b>${v.coverage.value.pct.toFixed(1)}%</b>
+           <span>coverage &mdash; ${v.coverage.value.caught} of the ${v.coverage.value.total} real
+           catches in the corpus still fire</span></div>
+       </div>
+       ${v.precision.value.indeterminate > 0
+      ? `<p class="unavail">${v.precision.value.indeterminate} labelled incident(s) could not be
+           re-evaluated and are counted against the total, not as passes.</p>` : ''}`
+    : `${note(figureReason(v.precision) || figureReason(v.coverage))}`;
+
+  const provenance = v.labelSet.available
+    ? `<p class="prov">Labelled set: <b>${v.labelSet.value.labelled}</b> incidents, labelled
+       <b>${esc(v.labelSet.value.labelledAt)}</b>, frozen at
+       <code>${esc(v.labelSet.value.hash.slice(0, 16))}…</code>. Precision and coverage are meaningless
+       without this line, so it is printed with them and never separately.</p>`
+    : '';
+
+  const sev = v.truePositivesBySeverity.available
+    ? `<div class="tablewrap"><table><thead><tr><th>severity</th><th>caught</th><th>what it means</th></tr></thead><tbody>
+       ${SEVERITY_ORDER.map((name) => {
+      const row = v.truePositivesBySeverity.available
+        ? v.truePositivesBySeverity.value.find((r) => r.severity === name) : undefined;
+      const meaning = name === 'critical'
+        ? 'a credential reached the model, or the guard itself was being disabled'
+        : name === 'high'
+          ? 'the agent left the boundary it was given, or destroyed something outside it'
+          : 'recoverable, or advisory';
+      return `<tr><td class="sev-${name}">${name}</td><td><b>${row?.count ?? 0}</b></td>
+                <td style="color:var(--dim)">${meaning}</td></tr>`;
+    }).join('')}
+       </tbody></table></div>`
+    : note(figureReason(v.truePositivesBySeverity));
+
+  const fp = v.falsePositivesByClass.available
+    ? (v.falsePositivesByClass.value.length === 0
+      ? '<p class="prov">No false positives in the labelled set.</p>'
+      : `<div class="tablewrap"><table><thead><tr><th>class</th><th>when recorded</th><th>still firing</th></tr></thead><tbody>
+         ${v.falsePositivesByClass.value.map((r) => `<tr><td>${esc(r.name)}</td>
+           <td style="color:var(--dim)">${r.then}</td>
+           <td class="${r.now === 0 ? 'fixed' : 'stillbad'}"><b>${r.now}</b></td></tr>`).join('')}
+         </tbody></table></div>
+         <p class="prov">The right-hand column is the number that has to fall. It is the count of
+         blocks that were wrong and would still be wrong today.</p>`)
+    : note(figureReason(v.falsePositivesByClass));
+
+  return `
+<h2 style="font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em">Value &mdash; was it right?</h2>
+${headline}
+${provenance}
+<h2 style="font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em">What it caught, by severity</h2>
+${sev}
+<h2 style="font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em">What it got wrong, by class</h2>
+${fp}
+<p class="prov">${v.activity.excludedDemo + v.activity.excludedFixture} demo and fixture incident(s)
+exist in this database and cannot reach any figure above &mdash; not filtered out at the end, but
+never admitted: the value figures read only <code>origin='live'</code>.</p>
+`;
 }
 
 function esc(s: string): string {
@@ -205,12 +294,24 @@ dt{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.06em
 dd{margin:0;word-break:break-word}
 .live{color:var(--good)}.fixture{color:var(--dim)}.layer{color:var(--dim);font-size:11px}
 .empty{color:var(--dim)}
+.stat.big b{font-size:34px}
+.grid.headline{margin-bottom:6px}
+.unavail{color:var(--warn);font-size:12px;margin:4px 0 16px;line-height:1.5}
+.prov{color:var(--dim);font-size:12px;margin:6px 0 22px;line-height:1.5}
+.sev-critical{color:var(--bad);font-weight:700}
+.sev-high{color:var(--warn);font-weight:700}
+.sev-medium{color:var(--dim)}
+.fixed{color:var(--good)}
+.stillbad{color:var(--bad)}
 footer{color:var(--dim);font-size:11px;margin-top:32px;border-top:1px solid var(--line);padding-top:12px}
 </style></head>
 <body><main>
 <h1>usewarden <span class="state ${stateClass}">${esc(d.overall)}</span></h1>
 <p style="color:var(--dim);margin:0">Read-only. Bound to 127.0.0.1. No external assets.</p>
 
+${valueSection(d.value)}
+
+<h2 style="font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em">Activity <span style="text-transform:none;letter-spacing:0;font-weight:400">&mdash; how often it fired, which is not how often it was right</span></h2>
 <div class="grid">
   <div class="stat"><b>${d.metrics.live.attempts}</b><span>actions blocked (real sessions)</span></div>
   <div class="stat"><b>${d.metrics.live.distinct_actions}</b><span>distinct actions blocked</span></div>

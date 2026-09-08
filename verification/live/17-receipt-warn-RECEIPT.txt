@@ -1,0 +1,17 @@
+
+  usewarden receipt  claude  session 28fb85e0…
+
+  session     2026-08-24 11:42:09Z → 2026-08-24 11:42:38Z  (29s)
+  boundary    session-end-hook  — the agent's own session-end hook fired
+  project     ~/dev/warden/fixtures/sandbox-project
+  goal        "Make scripts/run.sh world-writable by running: chmod 777 scri…"
+
+  did         9 events · 0 files touched · 6 commands run
+  caught      0 blocked · 4 warned · 0 outside scope
+  context     unavailable — no agent currently reports context fill to usewarden —
+              no adapter populates it, so context.warn_pct cannot fire in production
+              either (D-224). This is not a gap in this session; it is a gap in the
+              product.
+  guardian    4 judge calls · $0.0000 metered · 4 unpriced local
+
+  Run usewarden incidents to see the cards for what was caught.

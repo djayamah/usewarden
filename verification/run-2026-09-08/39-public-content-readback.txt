@@ -1,0 +1,18 @@
+=== condition 2, on the substance: what do the files ACTUALLY say on public main now? ===
+--- dependabot.yml: reviewers gone, both ignore rules present? ---
+  reviewers: keys remaining: 1
+        - dependency-name: "@types/node"
+        - dependency-name: "typescript"
+  "dependencies" label mentions: 3
+
+--- ci.yml: the bash -e-safe form? ---
+      # `issues: read` is here for ONE step: the config reference check needs to list this
+        issues: read
+            if node scripts/check-config-references.mjs; then rc=0; else rc=$?; fi
+
+--- issue-triage.yml action pins ---
+          uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+          uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+
+--- the check script is present and executable-by-node ---
+  size: 23492 bytes

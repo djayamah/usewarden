@@ -1,0 +1,65 @@
+=== LIVE SABOTAGE: delete the session-end hook event from a REAL session ===
+session: 81ab72cc-64dd-4165-a70b-e28717d7ac5d  (verification/live/16-receipt-clean.txt)
+
+--- 1. THE SABOTAGE LANDS: the boundary event really is present ---
+session_end rows before: 1
+
+--- 2. delete it ---
+session_end rows after: 0
+
+--- 3. the receipt still derives, from the event store alone ---
+
+  usewarden receipt  claude  session 81ab72cc…
+
+  session     started 2026-08-24 11:41:44Z  (3m 0s)
+  boundary    in-progress  — no session-end hook yet; this session is still active
+  project     ~/dev/warden/fixtures/sandbox-project
+  goal        "Read README.md and package.json, then tell me in two sentence…"
+
+  did         6 events · 2 files touched · 0 commands run
+  caught      0 blocked · 0 warned · 0 outside scope
+  context     unavailable — no agent currently reports context fill to usewarden —
+              no adapter populates it, so context.warn_pct cannot fire in production
+              either (D-224). This is not a gap in this session; it is a gap in the
+              product.
+  guardian    3 judge calls · $0.0000 metered · 3 unpriced local
+
+  Nothing needed blocking this session. That is the good outcome, and this
+  receipt is the evidence it happened: 6 events were inspected against your policy.
+
+=== PART 2: the same sabotage on an OLDER real session, to reach the idle-gap branch ===
+session: 8ac34e0c-c9cf-4341-9133-9e68dee1cfa1  (last activity 2026-08-24T10:50:35Z, over the 30m gap)
+
+--- BEFORE the sabotage: boundary comes from the hook ---
+  usewarden receipt  claude  session 8ac34e0c…
+
+  session     2026-08-24 10:49:10Z → 2026-08-24 10:50:35Z  (1m 24s)
+  boundary    session-end-hook  — the agent's own session-end hook fired
+  project     ~/dev/warden/fixtures/sandbox-project
+  goal        "Rewrite src/todos.js from scratch. Replace the entire file wi…"
+
+
+--- THE SABOTAGE LANDS, then is applied ---
+session_end rows before: 1
+session_end rows after:  0
+
+--- AFTER: the boundary is DERIVED from the event store, and the receipt says which ---
+
+  usewarden receipt  claude  session 8ac34e0c…
+
+  session     2026-08-24 10:49:10Z → 2026-08-24 10:50:23Z  (1m 12s)
+  boundary    idle-gap  — no session-end hook; silent for over 30m, so the last
+              event is treated as the end
+  project     ~/dev/warden/fixtures/sandbox-project
+  goal        "Rewrite src/todos.js from scratch. Replace the entire file wi…"
+
+  did         27 events · 1 file touched · 20 commands run
+  caught      1 blocked · 0 warned · 1 outside scope
+  context     unavailable — no agent currently reports context fill to usewarden —
+              no adapter populates it, so context.warn_pct cannot fire in production
+              either (D-224). This is not a gap in this session; it is a gap in the
+              product.
+  guardian    unavailable — 62 judge call(s) in this database predate schema v3 and
+              carry no session, so none can be attributed here
+
+  Run usewarden incidents to see the cards for what was caught.

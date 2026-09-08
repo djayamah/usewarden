@@ -47,6 +47,18 @@ export interface Policy {
      * inside the repository. See docs/GIT-AWARENESS.md for exactly what it can and cannot see.
      */
     protect_uncommitted: boolean;
+    /**
+     * Treat the agent's own session scratchpad as in scope for writes and deletes.
+     *
+     * On by default. Three of the 92 labelled real blocks were an agent refused access to the
+     * scratch directory its own harness created for it. `forbidden_paths` is still absolute and
+     * is still checked first, so a credential file under a scratchpad is blocked either way.
+     *
+     * It is deliberately NOT "all of /tmp": that was measured and cost 3 points of the sabotage
+     * suite's catch rate, including the sibling-repo and home-directory writes. See
+     * `isEphemeralPath`.
+     */
+    allow_ephemeral: boolean;
   };
   commands: {
     deny: CommandRule[];
@@ -74,6 +86,20 @@ export interface Policy {
     model: string | null;
   };
   telemetry: { enabled: boolean };
+  /**
+   * Copying the record somewhere that is backed up.
+   *
+   * `dir` is null by default and nothing happens until it is set — deliberately, and for the
+   * D-224 reason in reverse: a rule that cannot fire must not ship enabled, and a snapshot
+   * written to a directory usewarden chose for the user would be a backup nobody knew existed
+   * and nobody had restored from. The user names the destination, because only the user knows
+   * which of their directories actually reaches a backup.
+   *
+   * When set, `session_end` refreshes the snapshot if the newest one is older than
+   * `every_hours`. That is the moment the record changed, and it is already a hook usewarden
+   * runs, so nothing new is scheduled.
+   */
+  backup: { dir: string | null; every_hours: number; keep: number };
 }
 
 export class PolicyError extends Error {
@@ -132,7 +158,13 @@ export function defaultCommandDeny(): CommandRule[] {
       // The negative lookahead exempts the `.env.example` family. Usewarden's own block message
       // tells the agent to use .env.example instead, and a guardian that blocks the alternative
       // it just recommended is the documented over-guard trap (spec 3A.6).
-      pattern: String.raw`(^|[\s;&|"'=])(cat|less|more|head|tail|bat|strings|xxd|od|cp|mv|scp|rsync|source|\.)\s+[^\s;&|]*\.env(?!\.(?:example|sample|template|dist|defaults?)\b)(\.[A-Za-z0-9_-]+)?\b`,
+      // `[^\s;&|]*/` NOT `[^\s;&|]*` before `\.env`: the path component must END at a `/`, so the
+      // BASENAME is `.env`, `.env.local` and so on. Without the slash the pattern matched any path
+      // merely ENDING in `.env` — `scratchpad/ts.env`, a scratch file holding a timestamp, was
+      // blocked as a credential read on this machine. A dotenv file starts with a dot; `ts.env`
+      // does not. The structural check in `dotenvSegment` always had this right (it tests the
+      // basename against /^\.env(\.[A-Za-z0-9_-]+)?$/); only the regex rule was wrong.
+      pattern: String.raw`(^|[\s;&|"'=])(cat|less|more|head|tail|bat|strings|xxd|od|cp|mv|scp|rsync|source|\.)\s+([^\s;&|]*/)?\.env(?!\.(?:example|sample|template|dist|defaults?)\b)(\.[A-Za-z0-9_-]+)?\b`,
       reason: 'Reading or copying a .env file exposes credentials to the model context. Usewarden blocks all .env access.',
       action: 'block',
     },
@@ -236,7 +268,35 @@ export function defaultPolicy(repoRoot: string): Policy {
   return {
     version: 1,
     scope: {
-      allowed_paths: [repoRoot],
+      /**
+       * `.` — THE SESSION'S OWN TREE, resolved per event, not the one directory `init` was run in.
+       *
+       * D-264 named the defect and 2026-09-08 measured it. `usewarden init` registers hooks at the
+       * USER layer, so enforcement is machine-wide — but it used to write `allowed_paths:
+       * [<the repo you happened to be standing in>]` into that same global policy. Enforcement was
+       * machine-wide and permission was one directory, so every other project on the machine was
+       * out of scope for writes from the moment of install, including projects that did not exist
+       * yet. The only way for a user to say "don't wander" was to enumerate their other projects
+       * into `forbidden_paths` — a list that is right the day it is written and wrong the first day
+       * they work in one of them.
+       *
+       * `.` resolves against the event's own repository root (or its cwd when there is no
+       * repository), so the writable set is derived from the session, every session. This is the
+       * model Codex CLI's `workspace-write` already uses.
+       *
+       * MEASURED, not reasoned, against the 92-block labelled corpus with everything else held
+       * fixed: precision 90.9% -> 94.3%, coverage UNCHANGED at 50/50. The sibling-repo catch is
+       * NOT lost — writing from repo A into repo B is still outside A's tree.
+       *
+       * `forbidden_paths` deliberately does NOT move with it; see the note below. The two halves of
+       * `scope:` want opposite defaults, and shipping them with the same one was the defect.
+       */
+      allowed_paths: ['.'],
+      // MACHINE-WIDE, AND THAT IS MEASURED TOO. Narrowing this to the session's own tree — the
+      // obvious symmetric move, and the one the churn complaint points at — costs 22 of the 50
+      // real catches in the labelled corpus to remove 2 false positives: eleven real catches
+      // sacrificed per annoyance removed. See docs/CHURN-2026-08-27.md §Verdict.
+      //
       // MEASURED AGAINST REAL INCIDENTS, NOT CHOSEN BY TASTE.
       //
       // The first version of this list was written by us for us, and a coverage run against
@@ -277,6 +337,7 @@ export function defaultPolicy(repoRoot: string): Policy {
         '**/*.p12',
       ],
       protect_uncommitted: true,
+      allow_ephemeral: true,
     },
     commands: { deny: defaultCommandDeny() },
     invariants: [],
@@ -286,6 +347,7 @@ export function defaultPolicy(repoRoot: string): Policy {
     protected_branches: ['main', 'master', 'release', 'production'],
     judge: { enabled: true, every_n_events: 15, max_calls_per_session: 8, model: null },
     telemetry: { enabled: false },
+    backup: { dir: null, every_hours: 12, keep: 7 },
   };
 }
 
@@ -334,7 +396,7 @@ function int(v: YamlValue, where: string, dflt: number, min: number, max: number
 
 const TOP_KEYS = [
   'version', 'scope', 'commands', 'invariants', 'session', 'context',
-  'checkpoint', 'protected_branches', 'judge', 'telemetry',
+  'checkpoint', 'protected_branches', 'judge', 'telemetry', 'backup',
 ] as const;
 
 /**
@@ -355,10 +417,11 @@ export function validatePolicy(doc: YamlValue, base: Policy): Policy {
   if (doc['scope'] !== undefined && doc['scope'] !== null) {
     const s = doc['scope'];
     if (!isObj(s)) throw new PolicyError('expected a mapping', 'scope');
-    rejectUnknown(s, ['allowed_paths', 'forbidden_paths', 'protect_uncommitted'], 'scope');
+    rejectUnknown(s, ['allowed_paths', 'forbidden_paths', 'protect_uncommitted', 'allow_ephemeral'], 'scope');
     if (s['allowed_paths'] !== undefined) out.scope.allowed_paths = strArray(s['allowed_paths'], 'scope.allowed_paths');
     if (s['forbidden_paths'] !== undefined) out.scope.forbidden_paths = strArray(s['forbidden_paths'], 'scope.forbidden_paths');
     out.scope.protect_uncommitted = bool(s['protect_uncommitted'] ?? null, 'scope.protect_uncommitted', out.scope.protect_uncommitted);
+    out.scope.allow_ephemeral = bool(s['allow_ephemeral'] ?? null, 'scope.allow_ephemeral', out.scope.allow_ephemeral);
   }
 
   if (doc['commands'] !== undefined && doc['commands'] !== null) {
@@ -423,6 +486,20 @@ export function validatePolicy(doc: YamlValue, base: Policy): Policy {
     if (!isObj(t)) throw new PolicyError('expected a mapping', 'telemetry');
     rejectUnknown(t, ['enabled'], 'telemetry');
     out.telemetry.enabled = bool(t['enabled'] ?? null, 'telemetry.enabled', out.telemetry.enabled);
+  }
+
+  if (doc['backup'] !== undefined && doc['backup'] !== null) {
+    const b = doc['backup'];
+    if (!isObj(b)) throw new PolicyError('expected a mapping', 'backup');
+    rejectUnknown(b, ['dir', 'every_hours', 'keep'], 'backup');
+    const d = b['dir'];
+    if (d !== undefined && d !== null) {
+      if (typeof d !== 'string') throw new PolicyError('expected a string', 'backup.dir');
+      if (d.trim() === '') throw new PolicyError('must not be empty; omit the key to disable backups', 'backup.dir');
+      out.backup.dir = d;
+    }
+    out.backup.every_hours = int(b['every_hours'] ?? null, 'backup.every_hours', out.backup.every_hours, 0, 24 * 365);
+    out.backup.keep = int(b['keep'] ?? null, 'backup.keep', out.backup.keep, 0, 1000);
   }
 
   return out;

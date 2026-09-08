@@ -288,3 +288,78 @@ reporting none.
 
 None of the above leaves your machine. Telemetry is off by default, requires a recorded consent
 receipt naming the exact schema, and v1 ships no endpoint at all. See `docs/TELEMETRY.md`.
+
+---
+
+## 10. The value figures — added 2026-09-08
+
+Everything above this section counts **activity**: how many events were inspected, how many actions
+were blocked, what that might have saved. Those numbers are derived, per-origin and honest, and
+they share one defect that no amount of care about derivation fixes:
+
+**every one of them goes UP when usewarden is WRONG.**
+
+Over the six days this project's own author had it installed, the dashboard reported 59 blocked
+actions. 42 of the 92 stored blocks were false positives. A reader — and the reader was the author —
+saw a screen full of large numbers going up, and uninstalled the product. Activity is not value, and
+a dashboard that only reports activity will report its most flattering numbers on its worst day.
+
+So the dashboard now leads with four figures that go up only when usewarden is **right**.
+
+### Precision
+
+> Of the blocks that fire under your current rules, how many would a competent developer want?
+
+`TP / (TP + FP)`, printed with its denominator, always. It requires a **labelled set**: a human has
+read each stored block and recorded whether it should have happened, against a criterion written
+down in advance. `docs/PRECISION.md` is that criterion and `corpus-labels/FROZEN.sha256` freezes it.
+
+**Without a labelled set, precision is `unavailable`, with the reason on screen.** Not 0%, not 100%.
+Most machines will have no labelled set, and a page that renders "nobody has checked" as a
+percentage is lying in one direction or the other.
+
+### Coverage
+
+> Of the real catches in the corpus, how many still fire?
+
+`caught / total`, printed with its denominator, always, and **beside precision, never instead of
+it**. The two trade against each other, and the cheapest way to hit any precision target is to stop
+watching: a rule that no longer looks at a class of action cannot be wrong about it, and cannot
+catch anything in it either. `usewarden replay` prints `COVERAGE REGRESSION` when a change buys
+precision with coverage, and it is not averaged into anything.
+
+### True positives by severity
+
+> A caught `rm -rf` above the project is not a caught `chmod 777`.
+
+Derived from the RULE, not from the label, so it works on a machine that has never seen a labelled
+set. Three bands, and the boundaries are about reversibility rather than about how alarming the
+command looks:
+
+| band | what it means |
+|---|---|
+| **critical** | a credential reached the model, or the guard itself was being disabled. Neither can be undone: a secret in a context window cannot be recalled, and a rewritten policy file makes every later figure on the page fiction. |
+| **high** | the agent left the boundary it was given, or destroyed something outside it. |
+| **medium** | recoverable, or advisory. |
+
+### False positives by class
+
+Two columns: how many fired **when the corpus was recorded**, and how many **still fire**. The
+second is the number that has to fall, and putting it on the screen beside the first is the only
+way a reader can see whether it is falling.
+
+### The rules these obey
+
+1. **Demo and fixture data can never reach a value figure.** Not filtered out at the end — never
+   admitted. `liveOnly()` is the only route into `src/value.ts`, and `tests/value.test.ts` V1 fills
+   a database with 24 manufactured blocks and asserts that every value figure comes back
+   `unavailable` rather than flattering.
+2. **Arithmetic is re-checked on read.** Each figure is recomputed a second, independent way from
+   the row list, and a disagreement makes it `unavailable` with the discrepancy in the reason —
+   never a number that merely looks plausible.
+3. **A tampered or foreign label set is refused, not degraded.** A precision figure computed from
+   an unverified label set renders exactly like a verified one, and this page is what somebody
+   screenshots. V5 relabels an incident to move precision from 0% to 100% and asserts the page
+   reports neither.
+4. **Activity is kept and demoted**, under a heading that says what it is: *how often it fired,
+   which is not how often it was right.*

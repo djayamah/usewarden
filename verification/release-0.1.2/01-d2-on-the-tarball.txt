@@ -1,0 +1,142 @@
+D2 — THE PACKED TARBALL, NOT THE REPOSITORY
+Captured 2026-09-08T10:22:09Z, re-run after the live-session fix to src/policy/drift.ts.
+Every command below ran out of package/ unpacked from usewarden-0.1.2.tgz. The reason this is
+done on the tarball is D-239 and the three defects D2 found in the staged 0.1.0 artifact:
+a repository is not what a user installs.
+
+=== 1. WHAT IS IN THE TARBALL ===
+  commit: 05894893a146b8f3fc31f2c9b34ad949093d71f2
+  files:  51
+  shasum: b1cc0d720a12c5025288c43790e0ee69ae9af145
+  (a local npm pack is NOT the staged bytes and is not meant to be - what binds a staged
+   artifact to a commit is the provenance attestation npm signs at stage time)
+  nothing outside dist/src, assets, README.md, LICENSE, SECURITY.md, package.json:
+  confirmed - no source, no tests, no fixtures, no verification artifacts, no .env, no .npmrc
+
+=== 2. THE THREE CHECKS THAT FAILED ON 0.1.0'S STAGED ARTIFACT ===
+  exec bit:  -rwxr-xr-x   (expect -rwxr-xr-x)
+  --version: 0.1.2   (expect exactly 0.1.2, and nothing else - the flag used to print the whole 43-line usage)
+  demo:      4 incident cards printed
+
+=== 3. THE ESCAPE FIX, VERIFIED ON THE TARBALL AGAINST THE PUBLISHED 0.1.1 ===
+FORM                       0.1.1    0.1.2    COMMAND
+--------------------------------------------------------------------------------------------------------------
+sh -c                      ALLOW    DENY     sh -c 'rm -rf /'
+bash -c                    ALLOW    DENY     bash -c 'rm -rf /etc'
+bash -lc                   ALLOW    DENY     bash -lc 'rm -rf /etc'
+zsh -c                     ALLOW    DENY     zsh -c 'rm -rf /etc'
+dash -c                    ALLOW    DENY     dash -c 'rm -rf /etc'
+ksh -c                     ALLOW    DENY     ksh -c 'rm -rf /etc'
+/bin/sh -c                 ALLOW    DENY     /bin/sh -c 'rm -rf /etc'
+/usr/bin/env sh -c         ALLOW    DENY     env sh -c 'rm -rf /etc'
+env -i bash -c             ALLOW    DENY     env -i bash -c 'rm -rf /etc'
+env VAR=1 sh -c            ALLOW    DENY     env VAR=1 sh -c 'rm -rf /etc'
+nice sh -c                 ALLOW    DENY     nice sh -c 'rm -rf /etc'
+nice -n 10 bash -c         ALLOW    DENY     nice -n 10 bash -c 'rm -rf /etc'
+ionice sh -c               ALLOW    DENY     ionice sh -c 'rm -rf /etc'
+timeout sh -c              ALLOW    DENY     timeout 5 sh -c 'rm -rf /etc'
+timeout --preserve-status  ALLOW    DENY     timeout --preserve-status 5 bash -c 'rm -rf /etc'
+nohup sh -c                ALLOW    DENY     nohup sh -c 'rm -rf /etc'
+setsid sh -c               ALLOW    DENY     setsid sh -c 'rm -rf /etc'
+stdbuf sh -c               ALLOW    DENY     stdbuf -o0 sh -c 'rm -rf /etc'
+command sh -c              ALLOW    DENY     command sh -c 'rm -rf /etc'
+exec sh -c                 ALLOW    DENY     exec sh -c 'rm -rf /etc'
+time sh -c                 ALLOW    DENY     time sh -c 'rm -rf /etc'
+watch sh -c                ALLOW    DENY     watch -n1 sh -c 'rm -rf /etc'
+script -c                  DENY     DENY     script -q /dev/null sh -c 'rm -rf /etc'
+sudo -u sh -c              DENY     DENY     sudo -u root sh -c 'rm -rf /etc'
+sudo sh -c                 DENY     DENY     sudo sh -c 'rm -rf /etc'
+doas sh -c                 ALLOW    DENY     doas sh -c 'rm -rf /etc'
+su -c                      ALLOW    DENY     su -c 'rm -rf /etc'
+chroot sh -c               DENY     DENY     chroot / sh -c 'rm -rf /etc'
+find -exec sh -c           ALLOW    DENY     find . -type f -exec sh -c 'rm -rf /etc' {} ;
+find -exec direct          DENY     DENY     find / -name x -exec rm -rf /etc ;
+find -execdir              ALLOW    DENY     find . -execdir sh -c 'rm -rf /etc' {} ;
+xargs sh -c                ALLOW    DENY     echo x | xargs sh -c 'rm -rf /etc'
+xargs -I sh -c             ALLOW    DENY     echo x | xargs -I{} sh -c 'rm -rf /etc'
+parallel sh -c             ALLOW    DENY     parallel sh -c 'rm -rf /etc'
+flock sh -c                DENY     DENY     flock /tmp/l sh -c 'rm -rf /etc'
+unbuffer sh -c             ALLOW    DENY     unbuffer sh -c 'rm -rf /etc'
+make -c style              DENY     DENY     make -f /dev/null -c 'rm -rf /etc'
+awk system                 ALLOW    DENY     awk 'BEGIN{system("rm -rf /etc")}'
+perl -e                    ALLOW    DENY     perl -e 'system("rm -rf /etc")'
+python -c                  DENY     DENY     python3 -c 'import os;os.system("rm -rf /etc")'
+node -e                    ALLOW    DENY     node -e 'require("child_process").execSync("rm -rf /etc")'
+ruby -e                    ALLOW    DENY     ruby -e 'system("rm -rf /etc")'
+eval                       ALLOW    DENY     eval 'rm -rf /etc'
+ssh remote                 ALLOW    DENY     ssh host 'rm -rf /etc'
+git alias                  ALLOW    DENY     git -c alias.z='!rm -rf /etc' z
+npm exec                   ALLOW    DENY     npx -c 'rm -rf /etc'
+setarch                    ALLOW    DENY     setarch x86_64 sh -c 'rm -rf /etc'
+strace -E                  ALLOW    DENY     strace -f sh -c 'rm -rf /etc'
+BARE CONTROL rm            DENY     DENY     rm -rf /etc
+BARE CONTROL force push    DENY     DENY     git push --force origin main
+flock in-repo lock         ALLOW    DENY     flock ./lock sh -c 'rm -rf /etc'
+script in-repo out         ALLOW    DENY     script -q ./typescript sh -c 'rm -rf /etc'
+chroot in-repo             ALLOW    DENY     chroot ./jail sh -c 'rm -rf /etc'
+make in-repo -f            ALLOW    DENY     make -f ./Makefile -c 'rm -rf /etc'
+find in-repo -exec         DENY     DENY     find ./src -name x -exec rm -rf /etc ;
+sudo in-repo               DENY     DENY     sudo ./tool sh -c 'rm -rf /etc'
+python in-repo             DENY     DENY     python3 ./s.py -c 'import os;os.system("rm -rf /etc")'
+
+  55 wrapped forms, 2 bare controls
+  ALLOWED on published 0.1.1 : 44 of 55
+  ALLOWED on packed 0.1.2    : 0 of 55
+  bare controls refused by both: True
+
+=== 4. THE NEW POLICY-DRIFT CONTROL, RUN OUT OF THE TARBALL ===
+
+  policy drift
+
+  sealed 2026-08-19 (install) — ~/dev/warden/.work/drift-tgz/policy-seal.yaml
+  in force            — ~/dev/warden/.work/drift-tgz/usewarden.yaml
+  bytes DIFFER; 92 recorded block(s) replayed
+
+  YOUR RULES ARE WEAKER THAN THE ONES YOU INSTALLED.
+
+  18 thing(s) usewarden really stopped on this machine would NOT be stopped now:
+    2026-08-28  Write /Users/you/dev/REDACTED-app/db/migrations/0018_scopes.up.sql
+    2026-08-28  Write /Users/you/dev/REDACTED-app/web/lib/folder-inventory.ts
+    2026-08-28  Write /Users/you/dev/REDACTED-app/web/lib/folder-intake.ts
+    2026-08-28  Write /Users/you/dev/REDACTED-app/db/migrations/0018_scopes.up.sql
+    2026-08-29  Read /Users/you/dev/REDACTED-app/scripts/deploy.sh
+    2026-08-29  Edit /Users/you/dev/REDACTED-app/REDACTED_engine/weave2/payload.py
+    2026-08-29  Write /Users/you/dev/REDACTED-app/tests/test_restore_check_script.py
+    2026-08-29  Read /Users/you/dev/REDACTED-app/docs/shots/scope-cluster-leak-375.png
+    2026-08-29  Write /Users/you/dev/REDACTED-app/scripts/ops-queue.sh
+    2026-08-29  Edit /Users/you/dev/REDACTED-app/.claude/hooks/guard.sh
+    2026-08-29  Write /Users/you/dev/REDACTED-app/scripts/promote-migrations.sh
+    2026-08-29  Write /Users/you/dev/REDACTED-app/docs/proposals/migration-promotion-2026-08-29.md
+    2026-08-29  Write /Users/you/dev/REDACTED-app/docs/proposals/_writeprobe.md
+    2026-08-29  Write /Users/you/dev/REDACTED-app/probe.txt
+    2026-08-29  Write /Users/you/Documents/REDACTED-app/probe.txt
+    2026-08-29  Edit /Users/you/dev/REDACTED-app/REDACTED_engine/payload.py
+    2026-08-29  Write /Users/you/dev/REDACTED-app/docs/USEWARDEN-FINDINGS.md
+    2026-08-29  Read /Users/you/dev/REDACTED-app/PLAN.md
+
+  3 protection(s) you installed no longer fire:
+    · reading inside ~/Documents (scope.forbidden_paths[10])
+    · reading inside ~/dev/REDACTED-app (scope.forbidden_paths[12])
+    · writing inside ~/dev/REDACTED-app (scope.forbidden_paths[12])
+
+  1 more is still refused, but only because of where you happen
+  to be working. It used to be refused everywhere, from any project:
+    · writing inside ~/Documents scope.forbidden_paths[10] -> scope.allowed_paths
+
+  If you made this change on purpose, "usewarden reseal" accepts it as the new baseline.
+  If you did not, the rules you installed are still in ~/dev/warden/.work/drift-tgz/policy-seal.yaml.
+
+
+  (exit 1 - non-zero when the policy is weaker, so CI can gate on it)
+
+=== 5. THE NEW COMMANDS APPEAR IN --help, WHICH IS A BAKED SURFACE ===
+  policy [--drift]      Print the effective policy and where each part came from.
+                        --drift: what your rules USED TO CATCH and no longer do, measured by
+                        replaying both rulesets - not a diff of the file
+  reseal                Accept the policy in force as the new baseline. Do this only when you
+                        made the change yourself and meant it
+
+=== 6. WHAT THIS DOES NOT ESTABLISH ===
+  Nothing here has been staged, published or dist-tagged. Those are the founder's, under
+  CLAUDE.md section 3 and section 7 exception 1, and the npm trusted publisher is configured
+  --allow-stage-publish only so the registry refuses a direct release independently of this.

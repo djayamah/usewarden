@@ -1,0 +1,11 @@
+
+  usewarden sessions  6 most recent
+
+  ! 2026-08-24 11:43  claude  78e2ae2c      23s     5 ev   1b  0w
+  ~ 2026-08-24 11:42  claude  28fb85e0      29s     9 ev   0b  4w
+  · 2026-08-24 11:42  claude  81ab72cc      15s     7 ev   0b  0w
+  ! 2026-08-24 11:12  claude  usewarde      3ms     4 ev   4b  0w (idle) [demo]
+  ! 2026-08-24 11:06  claude  usewarde      4ms     4 ev   4b  0w (idle) [demo]
+  ! 2026-08-24 11:03  claude  1633b606   1m 40s    18 ev   1b  0w
+
+  ! blocked   ~ warned   · clean   · time = last activity ·  usewarden last

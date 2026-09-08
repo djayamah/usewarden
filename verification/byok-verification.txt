@@ -1,0 +1,18 @@
+=== BYOK VERIFICATION ===
+run: 2026-08-20T09:04:30Z   HEAD: d68f020
+
+--- 1. no key material in the SHIPPED package ---
+files shipped: 38
+RESULT: CLEAN - no credential pattern in any shipped file
+
+--- 2. git history (publish branch) ---
+SCAN_REF=publish pre-public-scan.sh: === SCAN CLEAN - safe to publish this history ===
+
+--- 3. Layer 1 with ZERO keys and no local CLI ---
+  caught 4/4 - Layer 1 needs no key and costs nothing
+
+--- 4. the judge with no provider at all ---
+  No judge available: set ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY, or install and authenticate the `claude` or `gemini` CLI.
+
+CONCLUSION: usewarden ships no key material, requires no key for its blocking layer,
+and degrades to one actionable sentence when no judge provider is configured.

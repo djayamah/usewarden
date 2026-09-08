@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-import { displayPath, mkdirpSafe } from './util.js';
+import { displayPath, mkdirpSafe, resolveUserPath } from './util.js';
 import './boot.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Store } from './store.js';
 import { scan, renderScan } from './scan.js';
+import { buildWeek, renderWeek } from './week.js';
+import { ageOfNewest, backupCorpus } from './backup.js';
 import { POLICY_INPUTS, cannotEverFire, unsupportedFields, whyUnsupported } from './policy/inputs.js';
 import {
   DEFAULT_TTL_HOURS, addException, loadExceptions, refuseIfNotHuman, remaining, revokeException,
@@ -14,15 +16,18 @@ import {
   renderNoSession, renderReceipt, renderReceiptLine,
 } from './receipt.js';
 import { runHook } from './hook.js';
-import { ensureHome, globalPolicyPath, usewardenHome } from './paths.js';
+import { ensureHome, globalPolicyPath, policySealPath, usewardenHome } from './paths.js';
+import { driftLines, isWeaker, sealPolicy, type DriftReport } from './policy/drift.js';
 import { detectAgents } from './install/detect.js';
 import { applyInit, latestBackupDir, nodePath, planInit, restoreConfigs, uninstall, usewardenScriptPath } from './install/installer.js';
-import { buildStatus, isUnlocked, relock, unlock, type StatusReport } from './status.js';
+import { ago, buildStatus, firingFinding, isUnlocked, relock, unlock, type DoctorFinding, type StatusReport } from './status.js';
 import { findRepoRoot, loadPolicy, PolicyLoadError, starterPolicyYaml, trust, untrust } from './policy/load.js';
 import { bad, box, checkbox, dim, head, ok, paint, stateBadge, table, warn, wrapLine } from './term.js';
 import { buildMetrics, fmtInt, fmtTokenBand, fmtUsdBand, TURN_TOKENS, TURNS_WASTED } from './metrics.js';
+import { buildValueReport } from './value.js';
+import { defaultLabelsFile } from './paths.js';
 
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 
 const USAGE = `usewarden ${VERSION} - a guardrail for your AI coding agents
 
@@ -37,13 +42,32 @@ COMMANDS
   allow <rule-id>       Waive one rule in this project for 24 hours. Humans only
   allow --list          Every waiver you have granted, and when each expires
   sessions [N]          One line per session, most recent first (default 20)
+  week [DAYS]           What your agents actually did in the last 7 days (real
+                        sessions only, never demo or fixture). Nothing is recorded
+                        means usewarden was not watching - that is not a quiet week
+  backup [--to DIR]     Write one verified copy of the record to a directory that
+                        your own backup already reaches. VACUUM INTO, integrity-
+                        checked and row-counted before it is called a snapshot.
+                        --if-older-than N skips when the last one is under N hours;
+                        --keep N sets how many are retained (default 7)
+  replay [--origin O]   Re-run every stored incident against the CURRENT rules and report,
+                        per incident, blocked-then / blocked-now / changed. The record
+                        is the only thing that can tell you whether a rule change fixed
+                        a false positive or quietly dropped a real catch. --policy FILE
+                        replays against a ruleset other than the one in force;
+                        --changed-only hides rows nothing happened to; --labels FILE
+                        adds precision and coverage from a frozen label set
   demo                  Run a safe simulated violation and show a real incident card
   incidents             Show the incident wall
   metrics               Every number usewarden reports, how it was derived, and what
                         it deliberately refuses to estimate
   dashboard             Serve the local read-only dashboard on 127.0.0.1
-  doctor                Diagnose why usewarden might not be firing
-  policy                Print the effective policy and where each part came from
+  doctor [--strict]     Diagnose why usewarden might not be firing (--strict: UNVERIFIED exits 1)
+  policy [--drift]      Print the effective policy and where each part came from.
+                        --drift: what your rules USED TO CATCH and no longer do, measured by
+                        replaying both rulesets - not a diff of the file
+  reseal                Accept the policy in force as the new baseline. Do this only when you
+                        made the change yourself and meant it
   trust <path>          Trust a repo's usewarden.yaml to widen scope (default: narrow only)
   untrust <path>        Revoke that trust
   unlock [--minutes N]  Suppress TAMPERED while you edit your own agent config
@@ -107,15 +131,19 @@ async function main(argv: string[]): Promise<number> {
   switch (cmd) {
     case 'init': return cmdInit(flags, json);
     case 'status': return cmdStatus(json);
-    case 'doctor': return cmdDoctor(json);
+    case 'doctor': return cmdDoctor(json, flags.has('--strict'));
     case 'incidents': return cmdIncidents(json, Number(args[1] ?? 20));
-    case 'policy': return cmdPolicy(json);
+    case 'policy': return argv.includes('--drift') ? cmdPolicyDrift(json) : cmdPolicy(json);
+    case 'reseal': return cmdReseal(json);
     case 'metrics': return cmdMetrics(json);
+    case 'replay': return (await import('./cli-replay.js')).cmdReplay(argv, json);
     case 'demo': return (await import('./demo.js')).runDemo(json);
     case 'scan': return cmdScan(json);
     case 'last': return cmdLast(json, args[1]);
     case 'allow': return cmdAllow(args.slice(1), json, flags);
     case 'sessions': return cmdSessions(json, Number(args[1] ?? 20));
+    case 'week': return cmdWeek(json, Number(args[1] ?? 7));
+    case 'backup': return cmdBackup(argv, json);
     case 'judge-run': return cmdJudgeRun(args[1]);
     case 'judge-check': return cmdJudgeCheck(json);
     case 'statusline': return (await import('./statusline.js')).runStatusLine();
@@ -360,6 +388,13 @@ function cmdInit(flags: Set<string>, json: boolean): number {
     // Idempotent re-run: mark the checklist even when nothing needed writing.
     if (res.applied) store.setMeta('installed', 'true');
 
+    // SEAL THE RULES, NOT JUST THE REGISTRATIONS. `applyInit` records an integrity hash for every
+    // agent config it touched, which is how TAMPERED is detected. Until 0.1.2 nothing did the
+    // equivalent for usewarden's OWN policy, so an edit that narrowed it was invisible to every
+    // surface — see the incident in src/policy/drift.ts. Re-sealing on every `init` is deliberate:
+    // `init` is a human running a command, which is exactly the authority a new baseline needs.
+    sealPolicy('install');
+
     const report = buildStatus(store, process.cwd());
     if (json) {
       emit(true, { policyCreated, policyPath: pol, applied: res.applied, backupDir: res.backupDir, errors: res.errors, changes: changes.map(summarize), status: report }, () => '');
@@ -411,13 +446,48 @@ function renderStatus(r: StatusReport): string {
     out.push('');
   }
 
-  const rows: string[][] = [[dim('AGENT'), dim('STATE'), dim('CONFIG')]];
-  for (const a of r.agents) rows.push([`${a.label} ${dim('(' + a.scope + ')')}`, stateBadge(a.state), dim(displayPath(a.configPath))]);
+  // ABOVE THE AGENT TABLE, DELIBERATELY.
+  //
+  // Every row of that table is about the AGENTS' hook registrations. On 2026-08-29 all of them
+  // were green — registered, unmodified, firing — for ten days while usewarden's own rules had
+  // been narrowed by an agent's `sed -i` and 18 blocks that had really happened on this machine
+  // would no longer have happened. A weakened ruleset is not a footnote to a PROTECTED badge; it
+  // is the thing that makes the badge mean less than it says.
+  if (isWeaker(r.drift)) {
+    const lines = driftLines(r.drift);
+    out.push(bad('  ' + lines[0]!));
+    for (const l of lines.slice(1)) out.push(l.startsWith('  ·') ? dim('  ' + l) : '  ' + l);
+    out.push('');
+  }
+
+  // A LAST FIRED COLUMN, because STATE alone answers the wrong question.
+  //
+  // STATE is read from a config file. It says the entries are there and unmodified, which is
+  // exactly what it said while every hook was dying on EACCES (writeups/01-hook-not-running).
+  // The column beside it is the only one that is evidence of execution, and putting them side by
+  // side is the point: a row reading PROTECTED / never is the shape of the bug.
+  const rows: string[][] = [[dim('AGENT'), dim('STATE'), dim('LAST FIRED'), dim('CONFIG')]];
+  for (const a of r.agents) {
+    const f = a.firing;
+    const fired = f.verdict === 'firing' ? dim(ago(f.lastEventTs!))
+      : f.verdict === 'pending' ? dim('not yet')
+        : warn('never');
+    rows.push([`${a.label} ${dim('(' + a.scope + ')')}`, stateBadge(a.state), fired, dim(displayPath(a.configPath))]);
+  }
   out.push(table(rows).split('\n').map((l) => '  ' + l).join('\n'));
   out.push('');
   for (const a of r.agents) {
     if (a.state !== 'PROTECTED') out.push(`  ${bad(a.label + ':')} ${a.detail}`);
     if (a.caveat) out.push(`  ${warn('note')} ${a.label}: ${a.caveat}`);
+    if (a.firing.verdict === 'unverified') {
+      // Not red, and not silent. Usewarden genuinely cannot tell "you have not opened this agent"
+      // from "its hooks do not execute" - so it reports the fact and the two readings, rather
+      // than picking one. Claiming the first would be the silent-guardian failure; claiming the
+      // second would be the false alarm that teaches people to ignore the tool.
+      out.push(`  ${warn('UNVERIFIED')} ${a.label} is registered but usewarden has never seen it fire.`);
+      out.push(dim('             Registration is not evidence of execution. Run any command in that'));
+      out.push(dim('             agent, then "usewarden doctor" - or the hooks are not running.'));
+    }
   }
   for (const n of r.policyNotices) out.push(`  ${warn('policy')} ${n}`);
   if (r.unlocked) out.push(`  ${warn('UNLOCKED')} tamper detection is suppressed. Run "usewarden lock" when you are done.`);
@@ -490,17 +560,40 @@ function renderSummary(r: StatusReport): string {
   return box('Protection summary', lines);
 }
 
-function cmdDoctor(json: boolean): number {
+/**
+ * `usewarden doctor` — "Diagnose why usewarden might not be firing".
+ *
+ * IT DID NOT USED TO CHECK WHETHER ANYTHING HAD FIRED. Six checks, every one of them a question
+ * about a config file: does the path resolve, does the script exist, do the entries match the
+ * hash, does the command point at us. All six can pass while not one hook has ever executed —
+ * which is exactly writeups/01-hook-not-running, where the entries were perfect and every spawn
+ * died with EACCES. The write-up's own closing line is "the check you want is not 'is it
+ * configured'. It is how many times has it run, and when was the last one", and the command
+ * named after that question was not asking it. Found 2026-09-08 (D-267); at the time, this
+ * repository's own state had Codex CLI registered for two weeks with zero events and doctor
+ * reported PASS on every Codex row.
+ *
+ * THE THIRD OUTCOME. A registered agent with no events is not a failure — the user may simply not
+ * have opened it. Nor is it a pass. It is UNVERIFIED, in the sense CLAUDE.md §4.4 and
+ * scripts/verify-all.sh already use: reported by name, counted separately, and never folded into
+ * the green. `--strict` turns UNVERIFIED into a non-zero exit for anyone gating on it.
+ */
+function cmdDoctor(json: boolean, strict = false): number {
   const store = new Store();
   try {
     const r = buildStatus(store, process.cwd());
-    const findings: { check: string; ok: boolean; detail: string }[] = [];
+    const findings: DoctorFinding[] = [];
     findings.push({ check: 'node binary resolves to an absolute path', ok: path.isAbsolute(nodePath()), detail: nodePath() });
     findings.push({ check: 'node binary exists and is executable', ok: isExecutable(nodePath()), detail: nodePath() });
     findings.push({ check: 'usewarden script resolves to an absolute path', ok: path.isAbsolute(usewardenScriptPath()), detail: usewardenScriptPath() });
     findings.push({ check: 'usewarden script exists on disk', ok: fs.existsSync(usewardenScriptPath()), detail: usewardenScriptPath() });
     findings.push({ check: 'state directory writable', ok: canWrite(usewardenHome()), detail: usewardenHome() });
     findings.push({ check: 'policy loads', ok: !r.policyError, detail: r.policyError ?? r.policySources.join(' -> ') });
+    // THE ROW THAT WAS MISSING ON 2026-08-29. Every other check in this command reads an AGENT's
+    // config; this one reads usewarden's. UNVERIFIED rather than PASS when there is nothing to
+    // compare against, because "I have no baseline" and "nothing was weakened" are different
+    // sentences and this is the command where the difference matters most.
+    findings.push(driftFinding(r.drift));
     // EVERY ROW CARRIES ITS OWN DETAIL.
     //
     // Three of these four used to share `a.detail`, which is the message for the agent's WORST
@@ -523,12 +616,59 @@ function cmdDoctor(json: boolean): number {
       findings.push({ check: `${a.label}: hooks not globally disabled`, ok: !a.hooksGloballyDisabled, detail: a.hooksGloballyDisabled ? 'disableAllHooks is true' : 'ok' });
       findings.push({ check: `${a.label}: command points at usewarden`, ok: a.commandPointsAtUsewarden,
         detail: a.commandPointsAtUsewarden ? usewardenScriptPath() : a.detail });
+      // Last, and the only one that is evidence rather than bookkeeping.
+      if (a.registered) findings.push(firingFinding(a));
     }
-    if (json) { emit(true, { overall: r.overall, findings }, () => ''); return findings.every((f) => f.ok) ? 0 : 1; }
+    const failed = findings.filter((f) => !f.ok && !f.unverified);
+    const unverified = findings.filter((f) => f.unverified);
+    const exit = failed.length > 0 ? 1 : (strict && unverified.length > 0) ? 1 : 0;
+
+    if (json) {
+      emit(true, { overall: r.overall, findings, unverified: unverified.length, strict }, () => '');
+      return exit;
+    }
     process.stdout.write('\n' + table([[dim('  '), dim('CHECK'), dim('DETAIL')],
-      ...findings.map((f) => [f.ok ? ok('PASS') : bad('FAIL'), f.check, dim(f.detail)])]) + '\n\n');
-    return findings.every((f) => f.ok) ? 0 : 1;
+      ...findings.map((f) => [f.unverified ? warn('UNVERIFIED') : f.ok ? ok('PASS') : bad('FAIL'), f.check, dim(f.detail)])]) + '\n\n');
+    if (unverified.length > 0) {
+      // Deliberately not folded into the PASS count. A control whose state could not be checked
+      // is reported as UNVERIFIED and counted against the total (CLAUDE.md §4.4) - "I could not
+      // tell" and "it is fine" are different sentences, and this is the command where the
+      // difference matters most.
+      process.stdout.write(warn(`  ${unverified.length} check${unverified.length === 1 ? '' : 's'} UNVERIFIED - not a pass.\n`));
+      process.stdout.write(dim('  Usewarden could not observe these working. Registration is not evidence of execution.\n'));
+      if (!strict) process.stdout.write(dim('  "usewarden doctor --strict" exits non-zero on these, for scripts and CI.\n'));
+      process.stdout.write('\n');
+    }
+    return exit;
   } finally { store.close(); }
+}
+
+/**
+ * One `doctor` row for the policy itself.
+ *
+ * The detail line names a NUMBER, not a state, when something has been lost: "3 protections you
+ * installed no longer fire" is actionable and "policy drift detected" is not. The distinction is
+ * the same one docs/VALUE-DELIVERED.md makes about every other figure this tool prints.
+ */
+function driftFinding(d: DriftReport): DoctorFinding {
+  if (d.unavailable) {
+    return { check: 'policy is no weaker than the one you installed', ok: false, unverified: true,
+      detail: d.unavailable };
+  }
+  if (!isWeaker(d)) {
+    return { check: 'policy is no weaker than the one you installed', ok: true,
+      detail: d.changed ? 'edited since install, and nothing it caught has been lost'
+        : 'unchanged since it was sealed' };
+  }
+  const lost = d.lostProbes.length;
+  const caught = d.lostCatches.length;
+  const down = d.downgradedProbes.length;
+  const bits: string[] = [];
+  if (caught > 0) bits.push(`${caught} real block${caught === 1 ? '' : 's'} on this machine would not happen now`);
+  if (lost > 0) bits.push(`${lost} installed protection${lost === 1 ? '' : 's'} no longer fire${lost === 1 ? 's' : ''}`);
+  if (down > 0) bits.push(`${down} downgraded from absolute to project-conditional`);
+  return { check: 'policy is no weaker than the one you installed', ok: false,
+    detail: `${bits.join('; ')} - run "usewarden policy --drift" for the list` };
 }
 
 /**
@@ -579,6 +719,101 @@ export function incidentCard(i: {
     `${dim('why')}      ${displayPath(i.reason)}`,
     `${dim('rule')}     ${i.rule}  ${dim('(layer ' + i.layer + ')')}`,
   ]);
+}
+
+/**
+ * `usewarden policy --drift` — the full list behind the one-line finding in `status` and `doctor`.
+ *
+ * It prints what was LOST, in two sections that are deliberately not merged: real blocks that
+ * happened on this machine and would not happen now, and installed protections that no longer
+ * fire. The first is evidence; the second is coverage. A user believes the first and needs the
+ * second, and a single blended count would hide which of the two a given machine actually has.
+ */
+function cmdPolicyDrift(json: boolean): number {
+  const store = new Store();
+  try {
+    const d = buildStatus(store, process.cwd(), 'full').drift;
+    if (json) { emit(true, d, () => ''); return isWeaker(d) ? 1 : 0; }
+    process.stdout.write('\n' + head('  policy drift') + '\n\n');
+    if (d.seal) {
+      const when = new Date(d.seal.sealedAt).toISOString().slice(0, 10);
+      process.stdout.write(dim(`  sealed ${when} (${d.seal.reason}) — ${displayPath(policySealPath())}\n`));
+      process.stdout.write(dim(`  in force            — ${displayPath(globalPolicyPath())}\n`));
+      process.stdout.write(dim(`  bytes ${d.changed ? 'DIFFER' : 'identical'}; ${d.corpusConsidered} recorded block(s) replayed\n\n`));
+    }
+    if (d.unavailable) {
+      process.stdout.write(warn(`  UNVERIFIED: ${d.unavailable}\n\n`));
+      return 0;
+    }
+    if (!isWeaker(d)) {
+      for (const l of driftLines(d)) process.stdout.write(ok(`  ${l}\n`));
+      if (d.gainedProbes.length > 0) {
+        process.stdout.write(dim(`\n  ${d.gainedProbes.length} protection(s) were ADDED since the seal:\n`));
+        for (const p of d.gainedProbes) process.stdout.write(dim(`    + ${p.label}\n`));
+      }
+      process.stdout.write('\n');
+      return 0;
+    }
+    process.stdout.write(bad('  YOUR RULES ARE WEAKER THAN THE ONES YOU INSTALLED.\n\n'));
+    if (d.lostCatches.length > 0) {
+      process.stdout.write(bad(`  ${d.lostCatches.length} thing(s) usewarden really stopped on this machine would NOT be stopped now:\n`));
+      for (const l of d.lostCatches) {
+        process.stdout.write(`    ${dim(new Date(l.ts).toISOString().slice(0, 10))}  ${l.attempted}\n`);
+      }
+      process.stdout.write('\n');
+    }
+    if (d.lostProbes.length > 0) {
+      process.stdout.write(bad(`  ${d.lostProbes.length} protection(s) you installed no longer fire:\n`));
+      for (const p of d.lostProbes) process.stdout.write(`    ${bad('·')} ${p.label} ${dim('(' + p.ruleThen + ')')}\n`);
+      process.stdout.write('\n');
+    }
+    if (d.downgradedProbes.length > 0) {
+      const n = d.downgradedProbes.length;
+      process.stdout.write(warn(`  ${n} more ${n === 1 ? 'is' : 'are'} still refused, but only because of where you happen\n`));
+      process.stdout.write(warn(`  to be working. ${n === 1 ? 'It used' : 'They used'} to be refused everywhere, from any project:\n`));
+      for (const p of d.downgradedProbes) {
+        process.stdout.write(`    ${warn('·')} ${p.label} ${dim(p.ruleThen + ' -> ' + p.ruleNow)}\n`);
+      }
+      process.stdout.write('\n');
+    }
+    if (d.gainedProbes.length > 0) {
+      process.stdout.write(dim(`  ${d.gainedProbes.length} protection(s) were added in the same edit — this does not cancel the losses above:\n`));
+      for (const p of d.gainedProbes) process.stdout.write(dim(`    + ${p.label}\n`));
+      process.stdout.write('\n');
+    }
+    process.stdout.write('  ' + dim('If you made this change on purpose, "usewarden reseal" accepts it as the new baseline.\n'));
+    process.stdout.write('  ' + dim('If you did not, the rules you installed are still in ' + displayPath(policySealPath()) + '.\n\n'));
+    return 1;
+  } finally { store.close(); }
+}
+
+/**
+ * `usewarden reseal` — accept the policy in force as the new baseline.
+ *
+ * A HUMAN COMMAND, and the reason drift detection is worth having at all. Without it the only way
+ * to silence a legitimate policy change would be to ignore the warning, and a warning people learn
+ * to ignore is worse than no warning (docs/CHURN-2026-08-27.md). It deliberately prints what it is
+ * about to accept before it accepts it.
+ */
+function cmdReseal(json: boolean): number {
+  const store = new Store();
+  try {
+    const before = buildStatus(store, process.cwd(), 'full').drift;
+    const meta = sealPolicy('reseal');
+    if (meta === null) {
+      if (json) { emit(false, { error: 'no policy to seal' }, () => ''); return 1; }
+      process.stderr.write(bad(`\n  There is no policy at ${displayPath(globalPolicyPath())} to seal.\n\n`));
+      return 1;
+    }
+    if (json) { emit(true, { sealed: meta, accepted: before }, () => ''); return 0; }
+    process.stdout.write('\n' + ok('  Sealed. This policy is now the baseline.\n'));
+    if (isWeaker(before)) {
+      process.stdout.write(warn(`  You accepted the loss of ${before.lostProbes.length} protection(s)`
+        + ` and ${before.lostCatches.length} recorded catch(es).\n`));
+    }
+    process.stdout.write(dim(`  ${displayPath(policySealPath())}\n\n`));
+    return 0;
+  } finally { store.close(); }
 }
 
 function cmdPolicy(json: boolean): number {
@@ -688,6 +923,49 @@ function cmdRestore(dir: string | undefined, json: boolean): number {
  * the savings estimate was computed from, every constant that went into it, and the categories
  * usewarden refuses to convert into dollars at all.
  */
+/**
+ * The value block for a terminal. Mirrors the dashboard's, from the same `buildValueReport`, so
+ * the two surfaces cannot drift into disagreeing about the same database.
+ */
+function valueLines(store: Store): string[] {
+  const v = buildValueReport({
+    store,
+    policy: loadPolicy(process.cwd()).policy,
+    labelsFile: defaultLabelsFile(),
+  });
+  const out: string[] = ['  ' + head('VALUE — was it right?')];
+  if (!v.precision.available) {
+    out.push('  ' + warn('precision   unavailable'));
+    for (const line of wrapLine(v.precision.reason, 74)) out.push('    ' + dim(line));
+    out.push('');
+    return out;
+  }
+  const p = v.precision.value;
+  out.push(`  precision   ${ok(`${p.pct.toFixed(1)}%`)}  ${dim(`(${p.truePositives} of ${p.denominator} blocks that fire today are ones a developer would want)`)}`);
+  if (v.coverage.available) {
+    const c = v.coverage.value;
+    out.push(`  coverage    ${c.pct >= 100 ? ok(`${c.pct.toFixed(1)}%`) : warn(`${c.pct.toFixed(1)}%`)}  ${dim(`(${c.caught} of the ${c.total} real catches in the corpus still fire)`)}`);
+  } else {
+    out.push(`  coverage    ${warn('unavailable')}  ${dim(v.coverage.reason)}`);
+  }
+  if (v.labelSet.available) {
+    const l = v.labelSet.value;
+    out.push('  ' + dim(`from ${l.labelled} incidents labelled ${l.labelledAt}, frozen at ${l.hash.slice(0, 16)}…`));
+  }
+  if (v.truePositivesBySeverity.available) {
+    const bands = v.truePositivesBySeverity.value.map((r) => `${r.severity} ${r.count}`).join('  ·  ');
+    out.push('  ' + dim(`caught by severity: ${bands}`));
+  }
+  if (v.falsePositivesByClass.available) {
+    const still = v.falsePositivesByClass.value.filter((r) => r.now > 0);
+    out.push('  ' + dim(still.length === 0
+      ? 'no labelled false positive still fires'
+      : `false positives still firing: ${still.map((r) => `${r.name} ${r.now}/${r.then}`).join(', ')}`));
+  }
+  out.push('');
+  return out;
+}
+
 function cmdMetrics(json: boolean): number {
   const store = new Store();
   try {
@@ -695,6 +973,11 @@ function cmdMetrics(json: boolean): number {
     if (json) {
       process.stdout.write(JSON.stringify({
         ...m,
+        value: buildValueReport({
+          store,
+          policy: loadPolicy(process.cwd()).policy,
+          labelsFile: defaultLabelsFile(),
+        }),
         constants: { turn_tokens: TURN_TOKENS, turns_wasted: TURNS_WASTED },
       }, null, 2) + '\n');
       return m.integrity.consistent ? 0 : 1;
@@ -703,6 +986,11 @@ function cmdMetrics(json: boolean): number {
     const out: string[] = [''];
     out.push('  ' + head('usewarden metrics'));
     out.push('');
+    // VALUE FIRST, AND ON THIS SURFACE TOO. The dashboard was rebuilt around value on
+    // 2026-09-08; leaving `metrics` reporting activity alone would have fixed the surface being
+    // worked on and left the one documented as "every number usewarden reports" saying the
+    // opposite thing. That failure has its own entry (D-273) and this is the same shape.
+    out.push(...valueLines(store));
     const rows: string[][] = [[dim('ORIGIN'), dim('BLOCKED'), dim('DISTINCT'), dim('DRIFT'), dim('EVENTS'), dim('SESSIONS')]];
     for (const [label, b] of [['real sessions', m.live], ['demo', m.demo], ['fixture/tests', m.fixture]] as const) {
       rows.push([label, fmtInt(b.attempts), fmtInt(b.distinct_actions), fmtInt(b.drift_warnings), fmtInt(b.events), fmtInt(b.sessions)]);
@@ -1008,6 +1296,98 @@ function cmdSessions(json: boolean, limit: number): number {
     out.push('');
     process.stdout.write(out.join('\n'));
     return 0;
+  } finally { store.close(); }
+}
+
+/**
+ * `usewarden backup [--to DIR] [--keep N]`
+ *
+ * The record is the thing usewarden claims is worth having (docs/RETENTION.md §2), and until this
+ * command existed it lived in exactly one file on exactly one disk with no way to get a copy of it
+ * that was safe to take while agents were writing. See src/backup.ts for why `cp` is not that way.
+ */
+function cmdBackup(argv: string[], json: boolean): number {
+  const toIdx = argv.indexOf('--to');
+  const keepIdx = argv.indexOf('--keep');
+  const pol = loadPolicy(findRepoRoot(process.cwd()) ?? process.cwd());
+  const dir = toIdx >= 0 ? argv[toIdx + 1] : (pol.policy.backup.dir ?? undefined);
+  const keep = keepIdx >= 0 ? Number(argv[keepIdx + 1]) : pol.policy.backup.keep;
+
+  if (!dir || dir.startsWith('-')) {
+    process.stderr.write(
+      bad('usewarden backup needs a destination.') + '\n' +
+      'Give it one that your own backup already reaches:\n\n' +
+      '  usewarden backup --to ~/some/backed-up/dir\n\n' +
+      'Or set it once, in ~/.usewarden/usewarden.yaml, and session_end will keep it fresh:\n\n' +
+      '  backup:\n    dir: ~/some/backed-up/dir\n    every_hours: 12\n    keep: 7\n');
+    return 2;
+  }
+
+  // `--if-older-than N` makes this safe to call from something that runs often (a git hook, a
+  // wrapper script) without writing a 6 MB file every time. A no-op is exit 0 and one line.
+  const olderIdx = argv.indexOf('--if-older-than');
+  const resolved = resolveUserPath(dir);
+  if (olderIdx >= 0) {
+    const hours = Number(argv[olderIdx + 1]);
+    if (!Number.isFinite(hours) || hours < 0) {
+      process.stderr.write(bad('--if-older-than needs a number of hours.') + '\n');
+      return 2;
+    }
+    const age = ageOfNewest(resolved);
+    if (age !== null && age < hours * 3600_000) {
+      const h = (age / 3600_000).toFixed(1);
+      emit(json, { skipped: true, ageHours: Number(h), threshold: hours }, () =>
+        dim(`Snapshot is ${h}h old, under the ${hours}h threshold. Nothing to do.`));
+      return 0;
+    }
+  }
+
+  try {
+    const r = backupCorpus(resolved, { keep: Number.isFinite(keep) ? keep : 7 });
+    emit(json, {
+      file: r.file, receipt: r.receipt, bytes: r.bytes, sha256: r.sha256,
+      counts: r.counts, pruned: r.pruned, ms: r.ms,
+    }, () =>
+      ok(`Snapshot written and verified in ${r.ms} ms.`) + '\n\n' +
+      table([
+          // displayPath, for the reason src/util.ts gives about it: a receipt is a thing people
+          // screenshot, and an absolute path carries the account name with it. The JSON above
+          // keeps the real path, because that one is for a machine.
+          ['File', displayPath(r.file)],
+          ['Size', `${(r.bytes / 1024 / 1024).toFixed(2)} MB`],
+          ['SHA-256', r.sha256],
+          ['Sessions', String(r.counts.sessions)],
+          ['Events', String(r.counts.events)],
+          ['Incidents', `${r.counts.incidents} (${r.counts.liveIncidents} from real sessions)`],
+          ['integrity_check', 'ok'],
+      ]) + '\n' +
+      dim(r.pruned.length > 0 ? `Pruned ${r.pruned.length} older snapshot(s).` : 'Nothing pruned.') + '\n' +
+      dim('This is a database, not a dump. Open it with: USEWARDEN_HOME=<dir> usewarden week 3650'));
+    return 0;
+  } catch (e) {
+    process.stderr.write(bad(`usewarden backup failed: ${(e as Error).message}`) + '\n');
+    return 1;
+  }
+}
+
+function cmdWeek(json: boolean, days: number): number {
+  const store = new Store();
+  try {
+    const n = Number.isFinite(days) && days > 0 ? Math.min(days, 365) : 7;
+    const w = buildWeek(store, n, Date.now());
+    if (json) {
+      emit(true, {
+        days: w.days, since: new Date(w.since).toISOString(),
+        sessions: w.sessions, events: w.events, blocked: w.blocked, warned: w.warned,
+        agents: w.agents, projects: w.projects, byRule: w.byRule,
+        nothingRecorded: w.nothingRecorded,
+      }, () => '');
+      // Exit 1 when nothing was recorded: a script asking "is usewarden watching?" must be able
+      // to tell that apart from a quiet week, and stdout alone would not.
+      return w.nothingRecorded ? 1 : 0;
+    }
+    process.stdout.write(renderWeek(w));
+    return w.nothingRecorded ? 1 : 0;
   } finally { store.close(); }
 }
 

@@ -1,14 +1,17 @@
 === USEWARDEN HARDENING VERIFICATION ===
-captured:  2026-08-19T17:33:28Z
+captured:  2026-08-20T09:32:48Z
 repo:      djayamah/usewarden
 package:   usewarden
-commit:    7a30cf2db8776a8acc78d9e3d766e9eba5603edb
+commit:    7b2649e80136b6446902317ea3cce5be06ad168f
 
 STATUS      CONTROL                                              DETAIL
 ----------- ---------------------------------------------------- ------
 PASS        gh CLI available and authenticated                   gh version 2.86.0 (2026-01-21)
 PASS        repository is PUBLIC (intended since 2026-08-19)     visibility=public
 PASS        default branch identified                            main
+PASS        private vulnerability reporting ENABLED              SECURITY.md names it as the whole disclosure channel
+PASS        secret scanning + push protection                    enabled/enabled
+PASS        SECURITY.md has a real disclosure route              links the private advisory form; publishes no email address
 PASS        branch ruleset is ACTIVE (not evaluate/disabled)     enforcement=active
 PASS        pull request required before merge                   rule: pull_request
 PASS        force pushes blocked                                 rule: non_fast_forward
@@ -30,7 +33,7 @@ PASS        no NPM_TOKEN anywhere in the workflow                trusted publish
 PASS        every action pinned to a commit SHA                  2 action(s), no tags
 PASS        .github/dependabot.yml present                       34 lines
 PASS        .github/CODEOWNERS present                           16 lines
-PASS        SECURITY.md present                                  91 lines
+PASS        SECURITY.md present                                  93 lines
 PASS        LICENSE present                                      21 lines
 PASS        .npmrc present                                       6 lines
 PASS        dependabot honours a cooldown                        matches .npmrc min-release-age
@@ -44,83 +47,10 @@ UNVERIFIED  npm 'require 2FA and disallow tokens'                package 'usewar
 UNVERIFIED  npm trusted publisher configured                     package 'usewarden' is not published yet - chicken-and-egg, see ops/SETUP-BY-HAND.md
 UNVERIFIED  npm account 2FA enabled                              npm exposes no API for another party to read your 2FA state - MANUAL: npmjs.com/settings/~/profile
 
-PASS 32    FAIL 1    UNVERIFIED 4
+PASS 35    FAIL 1    UNVERIFIED 4
 
 UNVERIFIED means this script could not check the control. It is counted as a FAILURE.
 A control whose state is unknown is not a control. Each UNVERIFIED row names the manual
 step that settles it - see ops/SETUP-BY-HAND.md.
 
 === NOT FULLY HARDENED: 1 failed, 4 could not be verified ===
-
-############################################################
-# BRANCH PROTECTION, PROVED BY ATTEMPTING
-############################################################
-
-=== BRANCH PROTECTION: PROVED BY ATTEMPTING, NOT BY READING SETTINGS ===
-captured: 2026-08-19T16:27:24Z
-repo:     djayamah/usewarden (public)
-actor:    the repository OWNER and sole admin - the account that bypass_actors would have
-          exempted if it were not empty. That is the point of the test: reading
-          'bypass_actors: []' out of the API only proves what the API says.
-commit:   a real commit on top of the current main, pushed for real.
-
---- ATTEMPT 1: ordinary direct push to main ---
-$ git push public HEAD:main
-  remote: error: GH013: Repository rule violations found for refs/heads/main.        
-  remote: Review all repository rules at https://github.com/djayamah/usewarden/rules?ref=refs%2Fheads%2Fmain        
-  remote: 
-  remote: - Changes must be made through a pull request.        
-  remote: 
-  To https://github.com/djayamah/usewarden.git
-   ! [remote rejected] HEAD -> main (push declined due to repository rule violations)
-  error: failed to push some refs to 'https://github.com/djayamah/usewarden.git'
-  exit: 1  (non-zero = rejected)
-
---- ATTEMPT 2: FORCE push to main ---
-$ git push --force public HEAD:main
-  remote: error: GH013: Repository rule violations found for refs/heads/main.        
-  remote: Review all repository rules at https://github.com/djayamah/usewarden/rules?ref=refs%2Fheads%2Fmain        
-  remote: 
-  remote: - Changes must be made through a pull request.        
-  remote: 
-  To https://github.com/djayamah/usewarden.git
-   ! [remote rejected] HEAD -> main (push declined due to repository rule violations)
-  error: failed to push some refs to 'https://github.com/djayamah/usewarden.git'
-  exit: 1  (non-zero = rejected)
-
---- ATTEMPT 3: DELETE main ---
-$ git push public :main
-  To https://github.com/djayamah/usewarden.git
-   ! [remote rejected] main (refusing to delete the current branch: refs/heads/main)
-  error: failed to push some refs to 'https://github.com/djayamah/usewarden.git'
-  exit: 1  (non-zero = rejected)
-
---- what main actually points at, after all three attempts ---
-  7ca9a06f2c36e06a3be6ac8a104179bb4c3de050
-  unchanged - nothing landed.
-
---- the ruleset that did it ---
-  ruleset: protect-main   enforcement: active
-failed to parse jq expression (line 1, column 81)
-    "  bypass_actors: \(.bypass_actors | length)\n  rules: \([.rules[].type] | join(\", \"))"
-                                                                                    ^  unexpected token "\\"
-  pull_request params: approvals=0 code_owner=false last_push=false threads=true
-
---- and the path that DOES work: a pull request ---
-    PR #3 "Hardening artifacts and the branch-protection proof" merged=true merged_by=djayamah sha=7ca9a06f
-    Merged with NO admin flag and NO bypass. The same content was rejected on a direct push.
-
---- two honest caveats ---
-  1. The deletion attempt was refused with "refusing to delete the current branch", which is
-     GitHub's default-branch guard answering before the ruleset's `deletion` rule got a turn.
-     Attempt 3 proves main cannot be deleted; it does not, alone, prove which control did it.
-     Attempts 1 and 2 are unambiguous.
-  2. required_approving_review_count is 0 and require_code_owner_review is false. That is
-     measured, not lazy: with one maintainer who is also the only code owner, GitHub returns
-     422 "Can not approve your own pull request", so any non-zero value makes main
-     permanently unmergeable and the only way out is an admin bypass - the exact hole this
-     ruleset closes. Direct and force pushes are still blocked for everyone including the
-     owner. ops/SETUP-BY-HAND.md step 11 flips both back on when a second maintainer exists.
-
-RESULT: PASS - direct push, force push and deletion are all rejected for the repository owner,
-        and the pull-request path merges without any bypass.

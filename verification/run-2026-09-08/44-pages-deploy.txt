@@ -1,0 +1,11 @@
+=== the pages deployment that merge triggered ===
+  success  2026-09-08T00:48:39Z  b47fe47c
+  success  2026-08-24T12:26:13Z  957dc662
+  success  2026-08-24T12:22:20Z  0345d08f
+=== the site after the redeploy: still live, links still resolve ===
+2026-09-08T00:49:50Z
+  200 https://djayamah.github.io/usewarden/
+  200 https://djayamah.github.io/usewarden/writeups/
+  200 https://djayamah.github.io/usewarden/writeups/01-hook-not-running.html
+--- served bytes still match public main ---
+  identical to public main's site/index.html

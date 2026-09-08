@@ -75,6 +75,67 @@ describe('claims: what an adversarial reader would attack first', () => {
     });
   }
 
+  // -------------------------------------------------------------------------------------------
+  // THE HONEST COMPARISON AGAINST THE AGENT'S OWN CONTROLS (added 2026-08-26)
+  //
+  // docs/RETENTION.md item 3, authorised by the founder. Claude Code's own deny rules match
+  // usewarden for blocking, and for writes that leave the project they BEAT it: Claude Code checks
+  // shell redirection targets as file writes, and its OS sandbox confines subprocesses. usewarden
+  // does neither, measured: 0 of 3 and 0 of 2 in verification/native-comparison/01-what-fires.txt.
+  //
+  // This is pinned because it is the single most deletable paragraph in the README. It reads like
+  // a sentence that undersells the product, so a future edit tidies it away - and the reason it is
+  // there is not visible from the paragraph itself. The reason is that a reader who works this out
+  // on their own stops trusting every other claim on the page, and there is no recovering from
+  // that. Deleting it should cost a deliberate change to this test.
+  // -------------------------------------------------------------------------------------------
+  test('the README says plainly that native controls may be enough, and better in one respect', () => {
+    const readme = fs.readFileSync(path.join(REPO, 'README.md'), 'utf8');
+    assert.match(readme, /you do not need this/i,
+      'the README no longer tells a single-agent Claude Code user they may not need usewarden');
+    assert.match(readme, /redirect/i,
+      'the README no longer names the shell-redirect gap');
+    assert.match(readme, /sandbox/i,
+      'the README no longer names the OS sandbox that covers what usewarden cannot');
+    // And the sources, because a claim about someone else's product without their documentation
+    // behind it is the kind of thing a reader is right to disbelieve.
+    assert.match(readme, /code\.claude\.com\/docs\/en\/permissions/,
+      'the redirection claim has lost its primary source');
+    assert.match(readme, /anthropic\.com\/engineering\/claude-code-sandboxing/,
+      'the sandbox claim has lost its primary source');
+  });
+
+  test('the README does not claim usewarden blocks things the agent natively cannot', () => {
+    const readme = fs.readFileSync(path.join(REPO, 'README.md'), 'utf8');
+    // USING versus NAMING - the same distinction the "firewall" test above makes, and this test
+    // failed on its own subject the first time it ran. The README RETIRES this claim by quoting
+    // it: 'the honest pitch is not "we block things Claude Code cannot"'. A bare pattern match
+    // cannot tell the retraction from the claim, so the preceding words are inspected, exactly as
+    // the firewall check does. That is D-091 arriving for the third time in this repository.
+    for (const m of readme.matchAll(/\bblocks? (?:things|what) (?:your |the )?(?:agent|Claude Code)[^.]*cannot\b/gi)) {
+      const before = readme.slice(Math.max(0, (m.index ?? 0) - 60), m.index ?? 0);
+      assert.match(before, /\bnot\b[^.]*$|never\b[^.]*$/i,
+        `the README makes the claim the comparison exists to retire: "${m[0]}"`);
+    }
+  });
+
+  // -------------------------------------------------------------------------------------------
+  // STALENESS. The npm README is baked into the tarball at publish time and cannot be corrected
+  // without a version bump (D-239), so a sentence that has quietly become false is a release
+  // defect rather than a typo. The site carried "Not yet published ... will not resolve today"
+  // for two published versions, because the release sweep grepped for a phrase and this file was
+  // worded differently. Pinned by CLAIM here rather than by phrase.
+  // -------------------------------------------------------------------------------------------
+  for (const [name, body] of surfaces) {
+    test(`${name} does not still say usewarden is unpublished`, () => {
+      for (const re of [/not yet published/i, /not been released to npm/i,
+        /not installable from npm/i, /will not resolve today/i, /no npm package yet/i]) {
+        assert.doesNotMatch(body, re,
+          `${name} still tells the reader usewarden is not on the registry; it has been since 0.1.0`);
+      }
+    });
+  }
+
   test('the npm description is the approved framing, not a paraphrase of it', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')) as
       { description?: string };
