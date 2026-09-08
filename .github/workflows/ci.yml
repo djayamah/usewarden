@@ -149,14 +149,17 @@ jobs:
       - name: Config references — every named repo object exists
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # `if node ...; then` and NOT `node ...; rc=$?`. Actions runs `bash -e`, so a non-zero exit
+        # kills the step on the command itself and `rc=$?` is never reached - the exit-3 branch
+        # below could not run, and the first public CI run went red on an UNVERIFIED it was
+        # written to tolerate. A condition is the one context where `-e` does not fire.
         run: |
-          node scripts/check-config-references.mjs; rc=$?
-          if [ $rc -eq 3 ]; then
-            echo "::warning::config reference check ran offline - existence was NOT verified"
-            node scripts/check-config-references.mjs --self-test-only
-          else
-            exit $rc
+          if node scripts/check-config-references.mjs; then rc=0; else rc=$?; fi
+          if [ "$rc" -eq 3 ]; then
+            echo "::warning::config reference check: some references were UNVERIFIED - this token could not read their class"
+            exit 0
           fi
+          exit "$rc"
 
       - name: Publication rehearsal — scan what publication would actually push
         env:

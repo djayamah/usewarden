@@ -268,12 +268,64 @@ function apiJson(repoSlug, endpoint) {
   try { return JSON.parse(r.stdout); } catch { return JSON.parse(`[${r.stdout.replace(/\]\s*\[/g, ',')}]`.replace(/^\[\[/, '[').replace(/\]\]$/, ']')); }
 }
 
+/**
+ * WHAT THE TOKEN CAN SEE IS NOT ALL-OR-NOTHING, AND TREATING IT THAT WAY THREW AWAY REAL ANSWERS.
+ *
+ * The first version fetched labels, environments and teams up front and let any failure abort the
+ * whole check. CI proved that wrong on the first public run: a workflow `GITHUB_TOKEN` reads
+ * labels fine and gets `403 Resource not accessible by integration` on `repos/{r}/teams`, so a
+ * run that had already successfully resolved every label reported UNVERIFIED about all of them.
+ *
+ * Each endpoint is now asked separately and a refusal marks only ITS OWN class unverified. Teams
+ * are fetched lazily and only if some file actually names one - asking for a permission nothing
+ * needs, and then failing on it, is how a check earns a reputation for crying wolf.
+ */
 function inventory(repoSlug) {
-  const labels = new Set((apiJson(repoSlug, 'labels') ?? []).map((l) => l.name));
-  const envs = new Set(((apiJson(repoSlug, 'environments') ?? {}).environments ?? []).map((e) => e.name));
-  const teams = new Set((apiJson(repoSlug, 'teams') ?? []).map((t) => `${t.organization?.login ?? ''}/${t.slug}`));
-  if (labels.size === 0) throw new Unverified(`read zero labels from ${repoSlug} — the inventory is not trustworthy`);
-  return { labels, envs, teams };
+  // DOES THE REPOSITORY ITSELF EXIST AND CAN THIS TOKEN SEE IT?
+  //
+  // Asked first, because every question below is about its contents. Without this a repository
+  // that is absent or invisible answers 404 to `collaborators/<login>` and the check reports
+  // "@name is not a collaborator" - five confident findings about a place it cannot see. Found by
+  // pointing the check at a repository that does not exist, which is the cheapest way to learn
+  // what a check says when its assumptions are false.
+  const probe = gh(['api', `repos/${repoSlug}`, '--jq', '.full_name']);
+  if (probe.status !== 0) {
+    const err = (probe.stderr || '').trim().split('\n')[0];
+    throw new Unverified(`cannot read ${repoSlug} itself (${err || 'unknown error'}) - nothing about its contents can be checked`);
+  }
+
+  const unverifiedKinds = new Map();
+  const tryFetch = (kind, fn) => {
+    try { return fn(); } catch (e) {
+      if (e instanceof Unverified) { unverifiedKinds.set(kind, e.message); return null; }
+      throw e;
+    }
+  };
+
+  const labelRows = tryFetch('label', () => apiJson(repoSlug, 'labels'));
+  const labels = labelRows === null ? null : new Set(labelRows.map((l) => l.name));
+  // Zero labels is not a believable answer for a repository that names some, and quietly
+  // reporting "none of your labels exist" would be a false alarm of the worst kind.
+  if (labels && labels.size === 0) unverifiedKinds.set('label', `read zero labels from ${repoSlug} - not a trustworthy inventory`);
+
+  const envRows = tryFetch('environment', () => apiJson(repoSlug, 'environments'));
+  const envs = envRows === null ? null : new Set((envRows.environments ?? []).map((e) => e.name));
+
+  return {
+    labels: labels && labels.size > 0 ? labels : null,
+    envs,
+    unverifiedKinds,
+    // Lazy, and cached: only a file that actually names a team makes this call.
+    teams: (() => {
+      let cached;
+      return () => {
+        if (cached !== undefined) return cached;
+        const rows = tryFetch('team', () => apiJson(repoSlug, 'teams'));
+        cached = rows === null ? null : new Set(rows.map((t) => `${t.organization?.login ?? ''}/${t.slug}`));
+        return cached;
+      };
+    })(),
+  };
 }
 
 /**
@@ -286,8 +338,10 @@ function actorHasAccess(repoSlug, login) {
   if (r.status === 0) return true;
   const err = (r.stderr || '').trim();
   if (/HTTP 404|Not Found/i.test(err)) return false;
-  if (/HTTP 403/.test(err)) throw new Unverified(`cannot read the collaborator list of ${repoSlug} (HTTP 403)`);
-  throw new Unverified(`collaborator check for @${login} failed: ${err.split('\n')[0]}`);
+  // A token that cannot read the collaborator list has not told us the actor is missing. Returning
+  // `null` keeps "I could not look" distinct from "I looked and it is not there" (CLAUDE.md §4.4).
+  if (/HTTP 403/.test(err)) return null;
+  return null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -371,27 +425,37 @@ function main() {
     throw e;
   }
 
-  console.log(`  checked against ${repoSlug}: ${inv.labels.size} labels, ${inv.envs.size} environments`);
+  const checked = [];
+  if (inv.labels) checked.push(`${inv.labels.size} labels`);
+  if (inv.envs) checked.push(`${inv.envs.size} environments`);
+  console.log(`  checked against ${repoSlug}: ${checked.join(', ') || 'nothing readable by this token'}`);
 
+  // Every reference whose class this token could not read. Reported by name and counted, never
+  // folded into the pass and never reported as a missing object.
+  const unverified = [];
   const seenActors = new Map();
   for (const r of refs) {
-    if (r.kind === 'label' && !inv.labels.has(r.name)) {
-      problems.push(`${r.file}:${r.line}  label \`${r.name}\` does not exist in ${repoSlug} — GitHub ignores it silently`);
+    if (r.kind === 'label') {
+      if (!inv.labels) { unverified.push(`${r.file}:${r.line}  label \`${r.name}\`: ${inv.unverifiedKinds.get('label')}`); continue; }
+      if (!inv.labels.has(r.name)) problems.push(`${r.file}:${r.line}  label \`${r.name}\` does not exist in ${repoSlug} — GitHub ignores it silently`);
     }
-    if (r.kind === 'environment' && !inv.envs.has(r.name)) {
-      problems.push(`${r.file}:${r.line}  environment \`${r.name}\` does not exist in ${repoSlug} — the job's protection rules are not what this file says`);
+    if (r.kind === 'environment') {
+      if (!inv.envs) { unverified.push(`${r.file}:${r.line}  environment \`${r.name}\`: ${inv.unverifiedKinds.get('environment')}`); continue; }
+      if (!inv.envs.has(r.name)) problems.push(`${r.file}:${r.line}  environment \`${r.name}\` does not exist in ${repoSlug} — the job's protection rules are not what this file says`);
     }
-    if (r.kind === 'team' && inv.teams.size > 0 && !inv.teams.has(r.name)) {
-      problems.push(`${r.file}:${r.line}  team \`@${r.name}\` has no access to ${repoSlug} — it will be assigned nothing`);
-    }
-    if (r.kind === 'team' && inv.teams.size === 0) {
-      problems.push(`${r.file}:${r.line}  team \`@${r.name}\` is named, but ${repoSlug} has no teams at all — it will be assigned nothing`);
+    if (r.kind === 'team') {
+      const teams = inv.teams();
+      if (!teams) { unverified.push(`${r.file}:${r.line}  team \`@${r.name}\`: ${inv.unverifiedKinds.get('team')}`); continue; }
+      problems.push(teams.size === 0
+        ? `${r.file}:${r.line}  team \`@${r.name}\` is named, but ${repoSlug} has no teams at all — it will be assigned nothing`
+        : teams.has(r.name) ? null : `${r.file}:${r.line}  team \`@${r.name}\` has no access to ${repoSlug} — it will be assigned nothing`);
+      if (problems[problems.length - 1] === null) problems.pop();
     }
     if (r.kind === 'actor') {
       if (!seenActors.has(r.name)) seenActors.set(r.name, actorHasAccess(repoSlug, r.name));
-      if (!seenActors.get(r.name)) {
-        problems.push(`${r.file}:${r.line}  @${r.name} is not a collaborator on ${repoSlug} — naming them assigns nobody`);
-      }
+      const got = seenActors.get(r.name);
+      if (got === null) { unverified.push(`${r.file}:${r.line}  @${r.name}: this token cannot read the collaborator list of ${repoSlug}`); continue; }
+      if (!got) problems.push(`${r.file}:${r.line}  @${r.name} is not a collaborator on ${repoSlug} — naming them assigns nobody`);
     }
   }
 
@@ -405,6 +469,13 @@ function main() {
     console.error('\nA configuration that names something absent is not a configuration that is off.');
     console.error('It is one that reads as on and enforces nothing.');
     return 1;
+  }
+
+  if (unverified.length > 0) {
+    console.log(`\n${unverified.length} reference(s) UNVERIFIED - this token could not read their class:`);
+    for (const u of unverified) console.log(`  ${u}`);
+    console.log('\nEverything else resolved. UNVERIFIED is not a pass (CLAUDE.md §4.4).');
+    return 3;
   }
 
   console.log('\nPASS  every label, environment, actor and team named in .github/ exists in ' + repoSlug);
