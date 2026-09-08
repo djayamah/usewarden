@@ -41,45 +41,41 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # THE CONTENT GATE RUNS EVERYWHERE. THE DEPLOY RUNS ONLY WHERE PAGES EXISTS.
+  #
+  # Split on 2026-09-08 because the private mirror had run this workflow three times and failed
+  # three times, and could never have done anything else: GitHub Pages is not enabled on
+  # `djayamah/warden` (the API answers 404), so `configure-pages` cannot succeed there. A workflow
+  # aimed at a surface that does not exist is the same defect this project keeps finding
+  # elsewhere - a guard pointed at a path nobody uses - and a run that is always red is a run
+  # nobody reads, which is how the OTHER failure in it stayed invisible for a fortnight (D-272).
+  check:
+    name: The published site fetches nothing
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # ONE IMPLEMENTATION OF THIS RULE, NOT TWO. It used to be inlined here AND in
+      # tests/site.test.ts, and they drifted: the test knew an `<a href>` is navigation rather than
+      # a fetch and allowlisted the two primary sources the page cites, while this file still
+      # refused every absolute URL in any attribute. Same shape as the internal-only path list
+      # before it became one file with three readers.
+      - name: Site self-containment
+        run: node scripts/check-site-selfcontained.mjs
+
   deploy:
+    needs: check
+    # Only the repository that actually has Pages. `vars.PAGES_REPO` lets a fork or a rename say so
+    # without editing the workflow; unset falls back to the repository this file is published from.
+    if: github.repository == (vars.PAGES_REPO || 'djayamah/usewarden')
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # THE SITE MUST STAY SELF-CONTAINED, AND THIS IS THE GATE THAT KEEPS IT SO.
-      #
-      # `site/index.html` ships with a CSP of `default-src 'none'` and the whole point of the page
-      # is that it never wants an external asset. A script tag or a CDN link arriving later would
-      # not break the build, it would just quietly stop the CSP from being true. So it fails here,
-      # before anything is published, rather than being noticed by a reader.
-      - name: The published site must contain no script and no external asset
-        run: |
-          set -euo pipefail
-          bad=0
-          while IFS= read -r f; do
-            if grep -qiE '<script' "$f"; then echo "FAIL $f contains a <script> tag"; bad=1; fi
-            # Every absolute origin appearing in a src= or href=, minus the ones we allow.
-            # grep -E has no lookahead, so the exclusion is a second pass rather than a clever
-            # regex - the first version used (?!github\.com) and would have silently matched
-            # nothing on GNU grep, which is a gate that passes because it is broken.
-            offending="$(grep -oiE '(src|href)="https?://[^"/]+' "$f" \
-              | sed -E 's/.*"https?:\/\///' \
-              | grep -vxE 'github\.com|djayamah\.github\.io' || true)"
-            if [ -n "$offending" ]; then
-              echo "FAIL $f references external origin(s): $(echo "$offending" | tr '\n' ' ')"; bad=1
-            fi
-            if grep -qiE 'fonts\.googleapis|cdn\.|unpkg|jsdelivr|google-analytics|googletagmanager' "$f"; then
-              echo "FAIL $f references a CDN or an analytics host"; bad=1
-            fi
-          done < <(find site -name '*.html' -type f)
-          if [ "$bad" -ne 0 ]; then
-            echo "=== REFUSING TO PUBLISH: the site is no longer self-contained ==="
-            exit 1
-          fi
-          echo "site is self-contained: no script, no CDN, no analytics"
 
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 

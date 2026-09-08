@@ -1,0 +1,12 @@
+=== does public/main's site/index.html carry the same two external links? ===
+  djayamah.github.io
+  github.com
+
+=== does public/main's pages.yml have the external-origin check at all? ===
+  occurrences of the origin check: 3
+
+=== when did the two links enter site/index.html? ===
+fb364a0 docs(honesty): say out loud that native controls are enough, and better in two places
+
+=== when did the origin check enter pages.yml? ===
+64ead44 feat(site): the write-up site, and GitHub Pages removes the hosting login entirely

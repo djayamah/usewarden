@@ -1,0 +1,22 @@
+=== REMOTE BRANCHES, both repos ===
+--- djayamah/warden ---
+  main
+--- djayamah/usewarden ---
+  main
+
+=== LOCAL branches in this checkout (not pushed anywhere) ===
+    bot-repin
+    demo-card-fix
+  + full-sync
+  * main
+    public-bot-corpus
+    public-scan-sync
+    readme-npm-live
+    release-0-1-1
+  + release-fixes
+  + release-npm-pin
+    release-staged
+    site-launch
+    site-nav
+    triage-bot
+    triage-bot-fix

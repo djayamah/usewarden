@@ -1,0 +1,21 @@
+=== GitHub About blurb — the line a person reads before clicking anything ===
+--- public repo, before ---
+  Stop your AI coding agent before it touches something it shouldn't. Local guardrail for 
+  Claude Code, Cursor, Gemini CLI and more — blocks out-of-scope writes, .env reads, rm -rf 
+  and force pushes. No API key, zero tokens.
+  (204 chars — GitHub's limit is 350)
+--- read back, separately ---
+  Free, local guardrail for AI coding agents — Claude Code, Cursor, Gemini CLI and more. 
+  Blocks out-of-scope writes, .env reads, rm -rf and force pushes. No API key, no account, 
+  nothing leaves your machine.
+=== tighten: the blurb has no room for the judge caveat, so it must not make an absolute claim ===
+  (200 chars)
+--- public, read back ---
+  Free, local guardrail for AI coding agents — Claude Code, Cursor, Gemini CLI and more. 
+  Blocks out-of-scope writes, .env reads, rm -rf and force pushes. No API key, no account, no 
+  telemetry by default.
+
+--- private mirror, kept consistent ---
+  Free, local guardrail for AI coding agents — Claude Code, Cursor, Gemini CLI and more. 
+  Blocks out-of-scope writes, .env reads, rm -rf and force pushes. No API key, no account, no 
+  telemetry by default.

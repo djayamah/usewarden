@@ -1,0 +1,20 @@
+=== repo health ===
+captured: 2026-09-08T03:43:59.471Z
+declared in scripts/repos.txt: 2
+  djayamah/warden	remote "origin"
+  djayamah/usewarden	remote "public"
+
+--- djayamah/warden ---
+  private, default branch main
+  djayamah/warden: 25 failed run(s) in the API window, historical unless named above
+  no failing runs, no stale pull requests
+
+--- djayamah/usewarden ---
+  public, default branch main
+  djayamah/usewarden: 13 failed run(s) in the API window, historical unless named above
+  djayamah/usewarden: issue #14 open 17d — Is this free or paid?
+  djayamah/usewarden: issue #9 open 18d — confused - do i need to pay for something?
+  no failing runs, no stale pull requests
+
+=== ALL 2 REPOSITOR(Y/IES) HEALTHY ===
+    no failed runs, no workflow that has never succeeded, no stale pull request.

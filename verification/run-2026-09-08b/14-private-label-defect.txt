@@ -1,0 +1,20 @@
+=== labels on the PRIVATE repo ===
+  accessibility, bug, documentation, duplicate, enhancement, good first issue, help 
+  wanted, invalid, question, wontfix
+
+=== the private repo's dependabot.yml — same config? ===
+      labels:
+        - "dependencies"
+      labels:
+        - "dependencies"
+
+=== so which repos does the config-reference check actually verify against? ===
+    checked against djayamah/usewarden: 15 labels, 2 environments
+=== create the missing labels on the PRIVATE repo, same as the public one ===
+2026-09-08T03:45:24Z
+dependencies
+adapter
+
+--- read back, separately ---
+  dependencies  0366d6  Dependency or GitHub Actions version bump. Applied by Dependabot per .github/dependabot.yml.
+  adapter  5319e7  Support for an AI coding agent: one src/adapters/ entry plus a docs/HOOK-MATRIX.md row.

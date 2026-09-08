@@ -1,0 +1,29 @@
+=== SABOTAGE: remove the label from the PRIVATE repo only ===
+The public repo stays healthy. If the check still passes, it is looking at one surface again.
+
+--- step 1: assert it is really there ---
+dependencies
+--- step 2: delete it from the PRIVATE repo ---
+deleted
+--- step 3: read back that it is gone ---
+{"message":"Not Found","documentation_url":"https://docs.github.com/rest/issues/labels#get-a-label","status":"404"}gh: Not Found (HTTP 404)
+--- step 4: the public repo is untouched ---
+  public still has: dependencies
+
+--- step 5: the check must FAIL, and must name the private repo ---
+
+2 problem(s):
+
+FAIL  djayamah/warden  .github/dependabot.yml:35  label `dependencies` does not exist — GitHub ignores it silently
+FAIL  djayamah/warden  .github/dependabot.yml:95  label `dependencies` does not exist — GitHub ignores it silently
+
+A configuration that names something absent is not a configuration that is off.
+It is one that reads as on and enforces nothing.
+EXIT: 
+=== RESTORE ===
+dependencies
+--- read back ---
+  dependencies restored
+--- check green again, both repos ---
+
+PASS  every label, environment, actor and team named in .github/ exists in all 2 repositor(y/ies): djayamah/warden, djayamah/usewarden

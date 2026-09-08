@@ -1,0 +1,28 @@
+=== SABOTAGE: every way of narrowing the sweep, and what each returns ===
+2026-09-08T03:29:48Z
+
+--- 1. narrowed to the healthy repo only: must NOT report green ---
+  exit: 1  (expect 1)
+    
+    === NARROWED SWEEP: 1 of 2 declared repositor(y/ies) ===
+        The ones checked are healthy. That is NOT a statement about this project,
+        which is the whole reason this script exists. Re-run without --only.
+
+--- 2. a declared repo with no remote configured ---
+  exit: 1  (expect 1)
+    FAIL  scripts/repos.txt and the git remotes disagree:
+            declared but no remote configured: djayamah/usewarden
+          A sweep whose set is uncertain cannot report health about the set.
+  (remote restored)
+
+--- 3. a remote configured that nobody declared ---
+  exit: 1  (expect 1)
+    FAIL  scripts/repos.txt and the git remotes disagree:
+            remote configured but not declared:  djayamah/some-other-repo
+          A sweep whose set is uncertain cannot report health about the set.
+  (rogue remote removed)
+
+--- 4. back to the real, full sweep: RED because one repo really is red ---
+  exit: 1  (expect 1 — the private repo is genuinely red)
+    FAIL  djayamah/warden: pages is RED on main — newest run 34174839031 at d1a01010 (2026-09-08T00:54:12Z)
+    FAIL  djayamah/warden: workflow "pages" has NEVER succeeded — 3 finished run(s), none green

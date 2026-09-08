@@ -1,0 +1,152 @@
+=== USEWARDEN FULL VERIFICATION PASS ===
+captured: 2026-09-08T03:54:02Z
+commit:   2a5d1ab7f85b30ff29c98a39530ab8fb6769dd9c
+branch:   main
+node:     v25.5.0   npm: 11.19.0
+
+--- clean build from scratch ---
+PASS  npm run build (strict, noUncheckedIndexedAccess)
+PASS  typecheck with no emit
+
+--- test suite, build machine ---
+  ℹ tests 774
+  ℹ suites 148
+  ℹ pass 774
+  ℹ fail 0
+PASS  full suite on v25.5.0
+      Layer-1 catch rate: 14/17 = 82.4%
+
+--- test suite, LTS target (Node 22) ---
+  # tests 774
+  # pass 774
+  # fail 0
+PASS  full suite on v22.22.0 (Active LTS)
+
+--- pre-publish check (runs first: it requires a clean working tree) ---
+PASS  pre-publish check
+
+--- the scan gates CI runs (identical invocations) ---
+PASS  no credential in the working tree
+PASS  publication rehearsal scans clean
+PASS  every label, environment and owner named in .github/ exists
+PASS  every repository this project pushes to is healthy
+PASS  the ALREADY-PUBLISHED head carries no identity string (fetched from GitHub, self-tested)
+
+--- fixture is reproducible from the tracked seed ---
+PASS  scripts/make-fixture.sh regenerates the sabotage fixture
+PASS  usewarden re-registers in the regenerated fixture
+
+--- end-to-end gates ---
+PASS  clean-machine simulation (pack -> install -> protect -> demo -> uninstall -> restore)
+PASS  dashboard screenshots rendered by a real headless browser (synthetic home)
+
+--- CLI smoke, against the live fixture state ---
+PASS  usewarden --version
+PASS  usewarden status
+PASS  usewarden doctor
+PASS  usewarden policy
+PASS  usewarden demo
+PASS  usewarden incidents --json
+PASS  usewarden telemetry status
+PASS  usewarden statusline
+
+--- live evidence on record ---
+  live catches from real agent sessions: 39 (requirement: >= 3)
+  metered judge spend: $0.0000 of $15.00 limit
+  live session transcripts:
+    verification/live/01-env-read.txt
+    verification/live/02-sibling-write.txt
+    verification/live/03-force-push.txt
+    verification/live/04-invariant-drift.txt
+    verification/live/05-dependency-drift.txt
+    verification/live/06-gemini-env.txt
+    verification/live/07-regression-check.txt
+    verification/live/08-ab-removal.txt
+    verification/live/08b-unprotected-session.txt
+    verification/live/08c-reprotected-session.txt
+    verification/live/09-shell-injection.txt
+    verification/live/10-rm-rf-outside.txt
+    verification/live/11-metrics-retry.txt
+    verification/live/12-dotenv-bypass-fixed.txt
+    verification/live/13-uncommitted-overwrite.txt
+    verification/live/14-modified-overwrite.txt
+    verification/live/15-untracked-draft.txt
+    verification/live/16-receipt-clean-RECEIPT.txt
+    verification/live/16-receipt-clean.txt
+    verification/live/17-receipt-warn-RECEIPT.txt
+    verification/live/17-receipt-warn.txt
+    verification/live/18-receipt-block-RECEIPT.txt
+    verification/live/18-receipt-block.txt
+    verification/live/19-receipt-sessions.txt
+    verification/live/20-receipt-sabotage-live.txt
+    verification/live/21-allow-agent-refused.txt
+    verification/live/22-allow-agent-refused.txt
+    verification/live/23-allow-agent-refused-RECEIPT.txt
+    verification/live/23-allow-agent-refused.txt
+
+--- metrics: derived, consistent, and uninflatable ---
+PASS  two demo runs recorded 8 blocks and moved the headline by 0
+PASS  metrics integrity check holds (exit 0)
+
+--- documented counts match reality ---
+PASS  README states 774 tests and the suite runs 774
+
+--- pre-push guard (CLAUDE.md section 7, exception 1) ---
+  core.hooksPath = .githooks
+  PASS  public https URL: conditions unmet, refused (exit 1)
+  PASS  public ssh URL: conditions unmet, refused (exit 1)
+  PASS  public URL under a lying remote name, refused (exit 1)
+  PASS  no URL is refused (fail closed) (exit 1)
+  PASS  public URL with no refs on stdin, refused (exit 1)
+  PASS  private origin allowed (exit 0)
+  PASS  private ssh origin allowed (exit 0)
+  === git hooks installed and PROVEN ===
+PASS  the public repository cannot be pushed to
+
+--- support bot: the eval set and the scope document ---
+PASS  support-bot eval: retrieval 20 20, end-to-end 20 20
+PASS  ops/BOT-SCOPE.md documents the blast radius
+
+--- built but NOT deployed ---
+PASS  no deploy artifact for the service or the site
+PASS  the client ships no telemetry endpoint
+
+--- documentation completeness ---
+PASS  README.md (823 lines)
+PASS  SECURITY.md (93 lines)
+PASS  LICENSE (21 lines)
+PASS  CONTRIBUTING.md (103 lines)
+PASS  DECISIONS.md (4356 lines)
+PASS  .github/workflows/ci.yml (171 lines)
+PASS  .github/workflows/release.yml (194 lines)
+PASS  .github/pull_request_template.md (29 lines)
+PASS  .github/ISSUE_TEMPLATE/bug_report.yml (66 lines)
+PASS  .github/ISSUE_TEMPLATE/agent_support.yml (40 lines)
+PASS  assets/incident-card.png (229 lines)
+PASS  assets/dashboard.png (862 lines)
+PASS  docs/HOOK-MATRIX.md (267 lines)
+PASS  docs/THREAT-MODEL.md (214 lines)
+PASS  docs/DEPENDENCY-BUDGET.md (193 lines)
+PASS  docs/TELEMETRY.md (138 lines)
+PASS  docs/METRICS.md (290 lines)
+PASS  docs/BOT-COSTS.md (68 lines)
+PASS  service/README.md (164 lines)
+PASS  site/README.md (55 lines)
+PASS  site/index.html (445 lines)
+PASS  ops/BOT-SCOPE.md (134 lines)
+PASS  ops/DASHBOARD.md (115 lines)
+PASS  ops/X-BOT-SETUP.md (83 lines)
+PASS  launch/HN-COMMENT-PREP.md (93 lines)
+PASS  launch/REDDIT-PRESENCE.md (74 lines)
+PASS  launch/DISCOVERABILITY.md (109 lines)
+PASS  ops/JUDGE-LIVE-CHECK.md (146 lines)
+PASS  CLAUDE.md (230 lines)
+PASS  PROGRESS.md (1266 lines)
+PASS  launch/NAME-CANDIDATES.md (107 lines)
+PASS  launch/POSTS.md (374 lines)
+PASS  launch/PUBLISH-CHECKLIST.md (95 lines)
+PASS  launch/RULES-REGISTRY.md (67 lines)
+
+PASS  every threat-model row names a real proving test
+
+=== FULL VERIFICATION PASS: ALL GATES GREEN ===

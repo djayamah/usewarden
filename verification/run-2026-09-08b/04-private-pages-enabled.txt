@@ -1,0 +1,17 @@
+=== is GitHub Pages enabled on the PRIVATE repo at all? ===
+{"message":"Not Found","documentation_url":"https://docs.github.com/rest/pages/pages#get-a-apiname-pages-site","status":"404"}gh: Not Found (HTTP 404)
+
+=== the 2026-08-24 pages failure: which step? ===
+run 32732099750
+  1. success  Set up job
+  2. success  Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  3. success  The published site must contain no script and no external asset
+  4. failure  Run actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d
+  5. skipped  Run actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9
+  6. skipped  Run actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128
+  12. success  Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+  13. success  Complete job
+
+=== was fb364a0 before or after that run? ===
+  fb364a0 2026-08-26 16:11:19 +0530 docs(honesty): say out loud that native controls are enough, and better in two places
+  c246672 2026-08-24 18:50:15 +0530 chore: cold-resume snapshot

@@ -1,0 +1,7 @@
+=== read back from the API: private repo runs for f498dba ===
+2026-09-08T03:43:46Z
+  success	CI	f498dba9	2026-09-08T03:41:43Z
+  success	pages	d7ab50e8	2026-09-08T03:36:58Z
+  failure	CI	d7ab50e8	2026-09-08T03:36:58Z
+  skipped	Issue triage	d1a01010	2026-09-08T00:55:59Z
+  success	github_actions in / for actions/deploy-pages - Update #1562898034	d1a01010	2026-09-08T00:55:31Z

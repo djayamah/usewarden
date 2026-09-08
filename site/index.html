@@ -52,7 +52,16 @@ h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.09em; color: 
 h3 { font-size: 17px; margin: 32px 0 8px; }
 p { margin: 0 0 16px; }
 a { color: inherit; text-underline-offset: 3px; }
-.lede { font-size: 18px; color: var(--dim); margin: 0 0 32px; max-width: 60ch; }
+.lede { font-size: 18px; color: var(--dim); margin: 0 0 24px; max-width: 60ch; }
+/* THE FIRST QUESTION REAL PEOPLE ASKED, ANSWERED WHERE THEY ASK IT. Two strangers opened issues
+   about price and privacy before anything else, so it sits above the fold rather than in a FAQ. */
+.answers { border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px;
+           margin: 0 0 32px; max-width: 60ch; background: var(--code-bg); }
+.answers h2 { font-size: 15px; margin: 0 0 10px; }
+.answers dl { margin: 0; }
+.answers dt { font-weight: 600; margin: 10px 0 2px; }
+.answers dt:first-of-type { margin-top: 0; }
+.answers dd { margin: 0; color: var(--dim); font-size: 14px; line-height: 1.6; }
 code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg);
        padding: 1px 5px; border-radius: 4px; }
 pre { font-family: var(--mono); font-size: 13px; line-height: 1.55; background: var(--code-bg);
@@ -110,6 +119,25 @@ footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--line);
     <code>rm -rf</code> above the project root and force pushes to <code>main</code> —
     deterministically, with no API key and zero tokens.
   </p>
+
+  <section class="answers">
+    <h2>Free. Local. No account.</h2>
+    <dl>
+      <dt>It is free.</dt>
+      <dd>MIT licence. No paid tier, no account, no sign-up, no trial.
+        <code>npm install -g usewarden</code> is the whole transaction.</dd>
+      <dt>It needs no API key.</dt>
+      <dd>The blocking is deterministic pattern and scope matching: zero tokens, zero API calls,
+        on every event. The one thing that can ever cost money is the optional drift judge, and
+        only if you hand it your own key for a paid API. Give it nothing and it says so, and the
+        blocking carries on.</dd>
+      <dt>Your code stays on your machine.</dt>
+      <dd>The blocking never leaves it. Telemetry is off by default and this version ships no
+        endpoint at all, so there is nowhere for a payload to go. The single exception is that
+        optional judge, which you switch on yourself, to a provider you pick, with your own key —
+        and its input is redacted and length-capped before it goes.</dd>
+    </dl>
+  </section>
   <h2>What a catch looks like</h2>
 
   <p>

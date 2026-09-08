@@ -1,0 +1,22 @@
+# EVERY REPOSITORY THIS PROJECT PUSHES TO. The single source of truth for "how many is all of them".
+#
+# `scripts/repo-health.mjs` reads this AND the git remotes, and refuses to run if they disagree in
+# either direction:
+#
+#   a remote here but not configured   -> a repository nobody is sweeping
+#   a remote configured but not here   -> a repository nobody decided to sweep
+#
+# Why a file rather than "just read the remotes": deriving the set from the remotes alone means a
+# remote that is removed, renamed, or never configured on a fresh clone silently NARROWS the sweep,
+# and the sweep then reports green about a smaller world than the project actually has. That is the
+# exact defect this file exists because of (D-273): on 2026-09-08 a run swept the public repository,
+# found it green, and reported "all CI green" while the private mirror had four failed runs and a
+# workflow that had never once succeeded.
+#
+# Adding a repository is therefore a deliberate edit here, in the same spirit as
+# scripts/internal-only-paths.txt — one list, more than one reader, and a test that proves no
+# reader carries its own copy.
+#
+# One `owner/name` per line. Blank lines and #-comments ignored.
+djayamah/warden
+djayamah/usewarden

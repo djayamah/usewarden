@@ -1,7 +1,7 @@
 {
   "name": "usewarden",
   "version": "0.1.1",
-  "description": "Stop your AI coding agent before it touches something it shouldn't. A local guardrail for Claude Code, Cursor, Gemini CLI and more: blocks out-of-scope writes, .env reads, rm -rf and force pushes, with no API key and zero tokens.",
+  "description": "Free, local guardrail for AI coding agents: Claude Code, Cursor, Gemini CLI and more. Blocks out-of-scope writes, .env reads, rm -rf and force pushes. No API key, no account, no telemetry by default.",
   "license": "MIT",
   "type": "module",
   "bin": {
