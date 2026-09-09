@@ -82,12 +82,24 @@ Listed here rather than only in the changelog, because a user deciding whether t
 not have to read release notes to find out that the version they have does not do what its package
 page says.
 
+**If you are on 0.1.0 or 0.1.1, upgrade: `npm install usewarden@latest`.** Both issues below are
+fixed in 0.1.2, which is live on npm as of 2026-09-09 and carries
+[SLSA provenance](https://www.npmjs.com/package/usewarden#provenance) built from
+`.github/workflows/release.yml` on `main`.
+
 | Version | Issue | Fixed in |
 |---|---|---|
 | **0.1.0, 0.1.1** | **A dangerous command hidden inside a quoted program string is not caught.** `sh -c 'rm -rf /'`, `env sh -c '…'`, `timeout 5 sh -c '…'` and 41 other wrapper forms are allowed; the bare command (`rm -rf /`) is correctly refused. The wrapper makes the payload resolve as a path inside the allowed scope, so the rule is skipped rather than evaluated. It needs no adversarial agent — 8.1% of real recorded agent commands use one of these wrapper forms as ordinary idiom. | 0.1.2 |
 | **0.1.0, 0.1.1** | **Nothing notices if usewarden's own policy is weakened.** `forbidden_paths` guards the agent's file tools and not the shell (documented), which includes `~/.usewarden/usewarden.yaml` itself. A policy narrowed by a shell command is enforced silently and `status` and `doctor` stay green. Prevention is not achievable from a hook; 0.1.2 seals the policy at install and reports weakening on `status`, `doctor` and `usewarden policy --drift`. | 0.1.2 |
 
 Both were found by this project's own testing, not reported externally.
+
+**Verified against the published tarball, not against the repository.** All 55 wrapped forms were
+re-run on the bytes downloaded from the registry after 0.1.2 went live, checksum-matched to the
+registry's own `shasum` and `integrity` first: 44 of 55 allowed on 0.1.1, **0 of 55 on 0.1.2**,
+with the two bare controls refused by both. One deliberate behaviour change came with the fix and
+is stated in [`CHANGELOG.md`](CHANGELOG.md): a recursive delete of an in-repo directory whose
+*name* contains a space is now refused.
 
 ## Usewarden's own supply chain
 
