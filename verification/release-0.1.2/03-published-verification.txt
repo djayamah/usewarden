@@ -1,0 +1,145 @@
+0.1.2 IS PUBLISHED — VERIFIED AGAINST THE REGISTRY, NOT AGAINST HEAD
+Captured 2026-09-09T04:43:07Z
+
+=== 1. THE STOP GATE: dist-tags ===
+  npm view usewarden dist-tags -> { bootstrap: '0.0.0', latest: '0.1.2' }
+  registry JSON        -> {'bootstrap': '0.0.0', 'latest': '0.1.2'}
+  versions             -> ['0.0.0', '0.1.0', '0.1.1', '0.1.2']
+  0.1.2 published at   -> 2026-09-09T04:39:18.024Z
+  Two independent reads agree on latest: 0.1.2. Proceeded.
+
+=== 2. PROVENANCE AND ATTESTATIONS ===
+  predicate    : https://slsa.dev/provenance/v1
+  subject      : pkg:npm/usewarden@0.1.2
+  builder      : https://github.com/actions/runner/github-hosted
+  repository   : https://github.com/djayamah/usewarden
+  ref          : refs/heads/main
+  workflow     : .github/workflows/release.yml
+  source commit: d7795f4e77cb21a5c757603e49293e9832914304
+  invocation   : https://github.com/djayamah/usewarden/actions/runs/34224649687/attempts/1
+  The source commit is d7795f4e77 — the merge of PR #35 — and the invocation is the
+  stage run that was approved. Both match what was staged.
+
+  npm audit signatures, on a clean registry install:
+    1 package has a verified registry signature
+    1 package has a verified attestation
+
+=== 3. CLEAN-MACHINE INSTALL FROM THE REGISTRY ===
+  npm install usewarden, brand-new empty cache, no local build:
+    version   : 0.1.2
+    resolved  : https://registry.npmjs.org/usewarden/-/usewarden-0.1.2.tgz
+    integrity : matches the registry's own sha512
+    --version : 0.1.2
+
+  A FINDING WORTH KEEPING. The first three attempts installed 0.1.1, with an empty cache,
+  while the registry said latest: 0.1.2. The cause was this repository's own .npmrc:
+  min-release-age=7 refuses any version published less than seven days ago. That is a
+  deliberate supply-chain defence and it was doing its job; it applies to anything run
+  inside ~/dev/warden and to nobody else's machine. With it neutralised the install takes
+  0.1.2 immediately. Recorded because 'npm install gave me the old version' is exactly the
+  shape of a botched publish, and it was not one.
+
+=== 4. ALL 55 WRAPPED FORMS, AGAINST THE PUBLISHED TARBALL ===
+  Bytes under test, checksum-matched to the registry before running anything:
+    sha1   170e0ab1914bfa945da31b64fafd8b60a36b617a
+    sha512 sha512-Fo3u1Fj6M9FlPmrymEQ+Tu6Bc82X7xrp75Prg6zKGgoKrIeGY4eJN5jjc9JDm/cBm7OVN7NMHaLRL7K5Nw55Mw==
+
+  FORM                       0.1.1    0.1.2    COMMAND
+  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -  -
+  sh -c                      ALLOW    DENY     sh -c 'rm -rf /'
+  bash -c                    ALLOW    DENY     bash -c 'rm -rf /etc'
+  bash -lc                   ALLOW    DENY     bash -lc 'rm -rf /etc'
+  zsh -c                     ALLOW    DENY     zsh -c 'rm -rf /etc'
+  dash -c                    ALLOW    DENY     dash -c 'rm -rf /etc'
+  ksh -c                     ALLOW    DENY     ksh -c 'rm -rf /etc'
+  /bin/sh -c                 ALLOW    DENY     /bin/sh -c 'rm -rf /etc'
+  /usr/bin/env sh -c         ALLOW    DENY     env sh -c 'rm -rf /etc'
+  env -i bash -c             ALLOW    DENY     env -i bash -c 'rm -rf /etc'
+  env VAR=1 sh -c            ALLOW    DENY     env VAR=1 sh -c 'rm -rf /etc'
+  nice sh -c                 ALLOW    DENY     nice sh -c 'rm -rf /etc'
+  nice -n 10 bash -c         ALLOW    DENY     nice -n 10 bash -c 'rm -rf /etc'
+  ionice sh -c               ALLOW    DENY     ionice sh -c 'rm -rf /etc'
+  timeout sh -c              ALLOW    DENY     timeout 5 sh -c 'rm -rf /etc'
+  timeout --preserve-status  ALLOW    DENY     timeout --preserve-status 5 bash -c 'rm -rf /etc'
+  nohup sh -c                ALLOW    DENY     nohup sh -c 'rm -rf /etc'
+  setsid sh -c               ALLOW    DENY     setsid sh -c 'rm -rf /etc'
+  stdbuf sh -c               ALLOW    DENY     stdbuf -o0 sh -c 'rm -rf /etc'
+  command sh -c              ALLOW    DENY     command sh -c 'rm -rf /etc'
+  exec sh -c                 ALLOW    DENY     exec sh -c 'rm -rf /etc'
+  time sh -c                 ALLOW    DENY     time sh -c 'rm -rf /etc'
+  watch sh -c                ALLOW    DENY     watch -n1 sh -c 'rm -rf /etc'
+  script -c                  DENY     DENY     script -q /dev/null sh -c 'rm -rf /etc'
+  sudo -u sh -c              DENY     DENY     sudo -u root sh -c 'rm -rf /etc'
+  sudo sh -c                 DENY     DENY     sudo sh -c 'rm -rf /etc'
+  doas sh -c                 ALLOW    DENY     doas sh -c 'rm -rf /etc'
+  su -c                      ALLOW    DENY     su -c 'rm -rf /etc'
+  chroot sh -c               DENY     DENY     chroot / sh -c 'rm -rf /etc'
+  find -exec sh -c           ALLOW    DENY     find . -type f -exec sh -c 'rm -rf /etc' {} ;
+  find -exec direct          DENY     DENY     find / -name x -exec rm -rf /etc ;
+  find -execdir              ALLOW    DENY     find . -execdir sh -c 'rm -rf /etc' {} ;
+  xargs sh -c                ALLOW    DENY     echo x | xargs sh -c 'rm -rf /etc'
+  xargs -I sh -c             ALLOW    DENY     echo x | xargs -I{} sh -c 'rm -rf /etc'
+  parallel sh -c             ALLOW    DENY     parallel sh -c 'rm -rf /etc'
+  flock sh -c                DENY     DENY     flock /tmp/l sh -c 'rm -rf /etc'
+  unbuffer sh -c             ALLOW    DENY     unbuffer sh -c 'rm -rf /etc'
+  make -c style              DENY     DENY     make -f /dev/null -c 'rm -rf /etc'
+  awk system                 ALLOW    DENY     awk 'BEGIN{system("rm -rf /etc")}'
+  perl -e                    ALLOW    DENY     perl -e 'system("rm -rf /etc")'
+  python -c                  DENY     DENY     python3 -c 'import os;os.system("rm -rf /etc")'
+  node -e                    ALLOW    DENY     node -e 'require("child_process").execSync("rm -rf /etc")'
+  ruby -e                    ALLOW    DENY     ruby -e 'system("rm -rf /etc")'
+  eval                       ALLOW    DENY     eval 'rm -rf /etc'
+  ssh remote                 ALLOW    DENY     ssh host 'rm -rf /etc'
+  git alias                  ALLOW    DENY     git -c alias.z='!rm -rf /etc' z
+  npm exec                   ALLOW    DENY     npx -c 'rm -rf /etc'
+  setarch                    ALLOW    DENY     setarch x86_64 sh -c 'rm -rf /etc'
+  strace -E                  ALLOW    DENY     strace -f sh -c 'rm -rf /etc'
+  BARE CONTROL rm            DENY     DENY     rm -rf /etc
+  BARE CONTROL force push    DENY     DENY     git push --force origin main
+  flock in-repo lock         ALLOW    DENY     flock ./lock sh -c 'rm -rf /etc'
+  script in-repo out         ALLOW    DENY     script -q ./typescript sh -c 'rm -rf /etc'
+  chroot in-repo             ALLOW    DENY     chroot ./jail sh -c 'rm -rf /etc'
+  make in-repo -f            ALLOW    DENY     make -f ./Makefile -c 'rm -rf /etc'
+  find in-repo -exec         DENY     DENY     find ./src -name x -exec rm -rf /etc ;
+  sudo in-repo               DENY     DENY     sudo ./tool sh -c 'rm -rf /etc'
+  python in-repo             DENY     DENY     python3 ./s.py -c 'import os;os.system("rm -rf /etc")'
+
+  ALLOWED on published 0.1.1 : 44 of 55
+  ALLOWED on published 0.1.2 : 0 of 55
+  bare controls refused by both: True
+
+=== 5. NEGATIVE CONTROLS ON THE PUBLISHED BUILD ===
+  ALLOW    rm -rf ./build
+  ALLOW    rm -rf ./node_modules
+  DENY     rm -rf "./my build dir"
+  ALLOW    npm test
+  ALLOW    git status
+  ALLOW    git commit -m "fix the thing"
+  ALLOW    grep -rn "rm -rf" ./docs
+  ALLOW    echo "never run rm -rf / on your laptop"
+  ALLOW    python3 - <<'PY'
+  ALLOW    ls -la ./src
+  ALLOW    make build
+  ALLOW    node ./scripts/build.js
+  ALLOW    env NODE_ENV=test npm test
+  ALLOW    timeout 60 npm test
+  ALLOW    sh -c 'npm test'
+  ALLOW    find ./src -name "*.ts" -print
+
+  One DENY, and it is the one named in CHANGELOG.md and in test E5: a recursive delete of an
+  in-repo directory whose NAME contains a space. Declared before release, not discovered after.
+
+=== 6. THE NEW CONTROL, OUT OF THE PUBLISHED TARBALL ===
+  usewarden policy --drift against a reconstruction of the 29 August machine state:
+  policy drift
+
+  sealed 2026-08-19 (install) — ~/dev/warden/.work/drift-pub/policy-seal.yaml
+  in force            — ~/dev/warden/.work/drift-pub/usewarden.yaml
+  bytes DIFFER; 92 recorded block(s) replayed
+
+  YOUR RULES ARE WEAKER THAN THE ONES YOU INSTALLED.
+
+  18 thing(s) usewarden really stopped on this machine would NOT be stopped now:
+    2026-08-28  Write /Users/you/dev/L~~~~~~~~-app/db/migrations/0018_scopes.up.sql
+    2026-08-28  Write /Users/you/dev/L~~~~~~~~-app/web/lib/folder-inventory.ts
+  exit 1, so CI can gate on it.

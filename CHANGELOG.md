@@ -8,10 +8,10 @@ git history — this file was started at 0.1.2 and says so rather than pretendin
 
 ---
 
-## [0.1.2] — unreleased
+## [0.1.2] — 2026-09-09
 
 **Two security fixes and one new control. If you run 0.1.0 or 0.1.1, the first item below is the
-reason to upgrade.**
+reason to upgrade: `npm install usewarden@latest`.**
 
 ### Fixed
 

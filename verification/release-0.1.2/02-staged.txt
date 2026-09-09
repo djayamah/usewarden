@@ -1,0 +1,17 @@
+STAGED, NOT PUBLISHED — 2026-09-08
+
+stage id:        bdb2c92b-5e28-4c5e-89b5-2558522850d0
+workflow run:    https://github.com/djayamah/usewarden/actions/runs/34224649687
+public main:     d7795f4e77cb21a5c757603e49293e9832914304
+release PR:      https://github.com/djayamah/usewarden/pull/35
+
+REGISTRY STATE AT STAGE TIME — nothing is live:
+  versions : ['0.0.0', '0.1.0', '0.1.1']
+  dist-tags: {'bootstrap': '0.0.0', 'latest': '0.1.1'}
+
+The founder's step, and his alone (CLAUDE.md section 3 and section 7 exception 1):
+  npm stage approve bdb2c92b-5e28-4c5e-89b5-2558522850d0
+
+It requires his hardware key. The npm trusted publisher for this package is configured
+--allow-stage-publish only, so the registry refuses a direct publish independently of
+anything written here or in the workflow.
